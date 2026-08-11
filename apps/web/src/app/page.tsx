@@ -21,7 +21,7 @@ export default async function HomePage() {
           history, not guessed at.
         </p>
         <ul className="hero-note">
-          <li>No sign-up</li>
+          <li>No sign-up, no GitHub access</li>
           <li>No model is asked for an opinion</li>
           <li>Same repo, same answer, every time</li>
         </ul>

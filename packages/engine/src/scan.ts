@@ -12,6 +12,7 @@ import {
   fetchRepoMeta,
   fetchTarball,
   type GitHubOptions,
+  type RepoMeta,
 } from "./ingest/github";
 import { AstIndex } from "./index/ast";
 import { FileIndex } from "./index/files";
@@ -116,6 +117,43 @@ export interface GitHubScanOptions extends GitHubOptions, ProvenanceOptions {
 }
 
 /**
+ * May we scan this repository at all?
+ *
+ * Pure, and exported, so the two gates that must never regress can be tested
+ * without touching the network.
+ *
+ * **The privacy check runs first, and the order is deliberate.** Reporting a
+ * size for a private repository would itself disclose something about it — that
+ * it exists, and roughly how big it is. Refuse before measuring.
+ */
+export function assertScannable(meta: RepoMeta, maxSizeKb: number): void {
+  /*
+   * A deployment needs a GITHUB_TOKEN for the rate limit, and that token
+   * carries its owner's `repo` scope — so the API will return the owner's
+   * private repositories to whoever types the slug into the public form.
+   *
+   * Being *able* to read a repository is never the same as the visitor being
+   * *authorised* to. Without this the form becomes a lookup service for every
+   * private repo the deploy token can reach, returning file paths, function
+   * names and verbatim comment text.
+   */
+  if (meta.isPrivate) {
+    throw new GitHubError(
+      "That repository is private. This scanner reads public repositories only.",
+      403,
+    );
+  }
+
+  if (meta.sizeKb > maxSizeKb) {
+    throw new GitHubError(
+      `That repository is ${Math.round(meta.sizeKb / 1024)}MB, larger than the ` +
+        `${Math.round(maxSizeKb / 1024)}MB limit this scanner accepts.`,
+      413,
+    );
+  }
+}
+
+/**
  * Scan a public GitHub repository end to end.
  *
  * Source and history are fetched concurrently — they are independent requests,
@@ -132,13 +170,7 @@ export async function scanGitHubRepository(
   const maxSizeKb = options.maxSizeKb ?? 150_000;
 
   const meta = await fetchRepoMeta(slug, options);
-  if (meta.sizeKb > maxSizeKb) {
-    throw new GitHubError(
-      `That repository is ${Math.round(meta.sizeKb / 1024)}MB, larger than the ` +
-        `${Math.round(maxSizeKb / 1024)}MB limit this scanner accepts.`,
-      413,
-    );
-  }
+  assertScannable(meta, maxSizeKb);
 
   const workdir = await mkdtemp(path.join(tmpdir(), "repo-audit-"));
 

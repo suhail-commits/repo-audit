@@ -159,6 +159,13 @@ firing on it is a false positive, not a result. That check alone has caught two 
 
 ### Deciding versus asking
 
+- **A question is not a work order.** "What happens if…", "how would we…", "I have a doubt about…"
+  means *explain it and lay out the options*, then stop. Do not open an editor. This holds even
+  when the answer is obvious and the fix is three lines — **especially** then, because an obvious
+  fix is the easiest thing to apply to the wrong problem. Answer, propose, wait.
+- **Discussion first for anything that changes behaviour or shape**: a new guard, a schema change,
+  a dependency, a rename, an abandoned approach. Describe what would change and why, get a yes,
+  then build.
 - **Decide alone** when the choice is reversible, internal, and has a conventional default. State
   the choice in the report and move on.
 - **Ask first** when different readings produce materially different work, when the action is

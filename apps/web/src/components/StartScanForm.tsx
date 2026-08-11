@@ -93,7 +93,10 @@ export function StartScanForm() {
     <form className="card" onSubmit={onSubmit}>
       <div className="field">
         <label htmlFor="repo">Public GitHub repository</label>
-        <p className="hint">Paste a URL, or just owner/repo.</p>
+        <p className="hint">
+          Paste a URL, or just owner/repo. Public repositories only &mdash; we
+          never ask for access to your account.
+        </p>
         <input
           id="repo"
           type="text"
