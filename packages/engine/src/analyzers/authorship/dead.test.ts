@@ -109,6 +109,26 @@ describe("orphan files", () => {
     expect(signal.value).toBe(0);
   });
 
+  it("does not count tsd type tests as unreachable source", async () => {
+    /*
+     * Seen on `sindresorhus/execa`: 151 of 261 files were `test-d/*.test-d.ts`
+     * type tests. Nothing imports them and nothing is meant to — `tsd` reads
+     * them directly — so every one read as dead code, maxing `orphan-files`
+     * and pushing a well-kept repository's health score up with it.
+     */
+    const ctx = await contextFor({
+      ...padding(),
+      "test-d/options.test-d.ts": `import {expectType} from 'tsd';\nexpectType<number>(1);\n`,
+      "test-d/result.test-d.ts": `import {expectType} from 'tsd';\nexpectType<string>('a');\n`,
+      "test-d/stream.test-d.ts": `import {expectType} from 'tsd';\nexpectType<boolean>(true);\n`,
+      "src/helpers.test-d.ts": `import {expectType} from 'tsd';\nexpectType<null>(null);\n`,
+    });
+
+    const signal = orphanFileSignal(ctx);
+    expect(signal.available).toBe(true);
+    expect(signal.value).toBe(0);
+  });
+
   it("still flags genuinely unreachable source files", async () => {
     const ctx = await contextFor({
       ...padding(),
