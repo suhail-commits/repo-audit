@@ -175,11 +175,11 @@ firing on it is a false positive, not a result. That check alone has caught two 
   approach through. Report what was learned, propose the correction, and do not quietly widen scope
   to accommodate it.
 
-### Playbook — adding or changing a provenance signal
+### Playbook — adding or changing an authorship signal
 
-1. Implement in `packages/engine/src/analyzers/provenance/`, returning a `Signal`. If inputs can be
+1. Implement in `packages/engine/src/analyzers/authorship/`, returning a `Signal`. If inputs can be
    missing, return `available: false` with an `unavailableReason` — **never** a value of 0.
-2. Register it with a weight in `analyzers/provenance/index.ts`.
+2. Register it with a weight in `analyzers/authorship/index.ts`.
 3. If it emits a `Finding`, write its template in `packages/rules/src/templates.ts`.
    `narrator.test.ts` fails if an engine rule falls through to the generic fallback.
 4. Unit-test both directions against `createFixtureRepo()`: the case that fires, and a clean case
@@ -412,7 +412,7 @@ signal, ask what it looks like on a codebase that legitimately does things diffe
 
 ## Current state
 
-Built and passing (91 tests): GitHub API ingest, index layer, 13 provenance signals (calibrated),
+Built and passing (91 tests): GitHub API ingest, index layer, 13 authorship signals (calibrated),
 tiered multi-language analysis, scoring, narrator with three personas, and a Vercel-ready web app
 that scans inline with no worker or queue.
 

@@ -1,4 +1,4 @@
-import { provenanceBand } from "@vibe/shared";
+import { authorshipBand } from "@vibe/shared";
 
 import { StartScanForm } from "@/components/StartScanForm";
 import { listExamples } from "@/db";
@@ -49,7 +49,7 @@ export default async function HomePage() {
                   <span>
                     <strong>{example.slug}</strong>
                     <em>
-                      {provenanceBand(score).replace("-", " ")} to be AI-generated
+                      {authorshipBand(score).replace("-", " ")} to be AI-generated
                     </em>
                   </span>
                 </a>

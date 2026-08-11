@@ -8,13 +8,13 @@ export {
 export type { AnalysisContext } from "./analyzers/context";
 
 export {
-  analyzeProvenance,
+  analyzeAuthorship,
   GROUND_TRUTH_SIGNAL_IDS,
-  type ProvenanceOptions,
-  type ProvenanceResult,
-} from "./analyzers/provenance/index";
+  type AuthorshipOptions,
+  type AuthorshipResult,
+} from "./analyzers/authorship/index";
 
-export { scoreDimension, provenanceBand } from "./score/index";
+export { scoreDimension, authorshipBand } from "./score/index";
 
 export {
   fetchRepoMeta,

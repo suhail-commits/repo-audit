@@ -10,10 +10,10 @@ export type Persona = "founder" | "engineer" | "acquirer";
 export const PERSONAS: readonly Persona[] = ["founder", "engineer", "acquirer"];
 
 /** The four questions the product answers. */
-export type Dimension = "provenance" | "security" | "quality" | "architecture";
+export type Dimension = "authorship" | "security" | "quality" | "architecture";
 
 export const DIMENSIONS: readonly Dimension[] = [
-  "provenance",
+  "authorship",
   "security",
   "quality",
   "architecture",
@@ -125,7 +125,7 @@ export interface Signal {
 
 export interface DimensionScore {
   dimension: Dimension;
-  /** 0..100. For provenance, higher means more likely AI-generated. */
+  /** 0..100. For authorship, higher means more likely AI-generated. */
   score: number;
   confidence: Confidence;
   signals: Signal[];

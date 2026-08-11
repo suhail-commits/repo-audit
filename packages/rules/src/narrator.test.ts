@@ -1,4 +1,4 @@
-import { buildContext, analyzeProvenance } from "@vibe/engine";
+import { buildContext, analyzeAuthorship } from "@vibe/engine";
 import { createFixtureRepo } from "@vibe/engine/testing";
 import type { Finding, ScanResult } from "@vibe/shared";
 import { afterEach, describe, expect, it } from "vitest";
@@ -63,7 +63,7 @@ async function findingsFor(
   cleanup = repo.cleanup;
 
   const ctx = await buildContext(repo.rootPath);
-  return analyzeProvenance(ctx).findings;
+  return analyzeAuthorship(ctx).findings;
 }
 
 describe("template coverage", () => {
@@ -96,7 +96,7 @@ describe("template coverage", () => {
     cleanup = repo.cleanup;
 
     const ctx = await buildContext(repo.rootPath);
-    const emitted = analyzeProvenance(ctx).score.signals.map((s) => s.id);
+    const emitted = analyzeAuthorship(ctx).score.signals.map((s) => s.id);
     expect(emitted.length).toBeGreaterThan(0);
 
     const labelled = new Set(labelledSignalIds());
@@ -128,7 +128,7 @@ describe("template coverage", () => {
 describe("persona voice", () => {
   const finding: Finding = {
     ruleId: "duplicate-function",
-    dimension: "provenance",
+    dimension: "authorship",
     severity: "medium",
     confidence: "high",
     source: "builtin",
@@ -238,7 +238,7 @@ describe("score narration", () => {
   it("states plainly that missing evidence does not mean clean code", () => {
     const result = scanResultWith([
       {
-        dimension: "provenance",
+        dimension: "authorship",
         score: 61,
         confidence: "medium",
         signals: [],
@@ -263,7 +263,7 @@ describe("score narration", () => {
   it("gives the founder a verdict sentence and the engineer a measurement", () => {
     const result = scanResultWith([
       {
-        dimension: "provenance",
+        dimension: "authorship",
         score: 82,
         confidence: "certain",
         signals: [],
@@ -275,7 +275,7 @@ describe("score narration", () => {
       "This app was almost certainly built with AI coding tools.",
     );
     expect(narrator.report(result, "engineer").headline).toMatch(
-      /Provenance 82\/100.*near-certain.*certain confidence/,
+      /Authorship 82\/100.*near-certain.*certain confidence/,
     );
   });
 
@@ -287,7 +287,7 @@ describe("score narration", () => {
      */
     const result = scanResultWith([
       {
-        dimension: "provenance",
+        dimension: "authorship",
         score: 15,
         confidence: "high",
         signals: [
@@ -318,7 +318,7 @@ describe("score narration", () => {
   it("still says hand-written when nothing points at AI tooling", () => {
     const result = scanResultWith([
       {
-        dimension: "provenance",
+        dimension: "authorship",
         score: 4,
         confidence: "high",
         signals: [
@@ -340,7 +340,7 @@ describe("score narration", () => {
   it("only cites evidence from signals that actually fired", () => {
     const result = scanResultWith([
       {
-        dimension: "provenance",
+        dimension: "authorship",
         score: 40,
         confidence: "high",
         signals: [
@@ -378,7 +378,7 @@ describe("score narration", () => {
   it("tells a clean repo there is nothing to do, in each register", () => {
     const result = scanResultWith([
       {
-        dimension: "provenance",
+        dimension: "authorship",
         score: 4,
         confidence: "high",
         signals: [
@@ -401,7 +401,7 @@ describe("score narration", () => {
   it("says the reading is provisional when most checks could not run", () => {
     const result = scanResultWith([
       {
-        dimension: "provenance",
+        dimension: "authorship",
         score: 10,
         confidence: "low",
         signals: [
@@ -423,7 +423,7 @@ describe("score narration", () => {
   it("counts only actionable findings, not informational ones", () => {
     const result = scanResultWith([
       {
-        dimension: "provenance",
+        dimension: "authorship",
         score: 4,
         confidence: "high",
         signals: [signalStub("agent-tooling", 1)],
@@ -434,7 +434,7 @@ describe("score narration", () => {
     result.findings = [
       {
         ruleId: "ai-agent-tooling",
-        dimension: "provenance",
+        dimension: "authorship",
         severity: "info",
         confidence: "certain",
         source: "builtin",
@@ -454,7 +454,7 @@ describe("score narration", () => {
   it("orders findings worst-first", () => {
     const mk = (id: string, severity: Finding["severity"]): Finding => ({
       ruleId: id,
-      dimension: "provenance",
+      dimension: "authorship",
       severity,
       confidence: "high",
       source: "builtin",

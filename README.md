@@ -185,7 +185,7 @@ carefully written codebase — whoever or whatever wrote it — that is exactly 
 
 ## Status
 
-Provenance analysis is complete and calibrated. Security analysis — route-level auth coverage,
+Authorship analysis is complete and calibrated. Security analysis — route-level auth coverage,
 missing tenant filters, exposed secrets — is the next piece, and is deliberately JavaScript and
 TypeScript only, because those rules need framework semantics rather than syntax.
 `ScanResult.architecture` returns `insufficient-evidence` rather than inventing a verdict for an

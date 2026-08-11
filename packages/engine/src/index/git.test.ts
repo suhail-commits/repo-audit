@@ -6,7 +6,7 @@ import {
   buildVelocitySignal,
   commitSizeSignal,
   writeOnceFilesSignal,
-} from "../analyzers/provenance/commit-shape";
+} from "../analyzers/authorship/commit-shape";
 import { GitIndex, type Commit } from "./git";
 
 /**

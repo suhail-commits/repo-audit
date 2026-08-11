@@ -226,7 +226,7 @@ export function platformFindings(ctx: AnalysisContext): Finding[] {
   if (builders.length > 0) {
     findings.push({
       ruleId: "ai-builder-platform",
-      dimension: "provenance",
+      dimension: "authorship",
       severity: "info",
       confidence: "certain",
       source: "builtin",
@@ -243,7 +243,7 @@ export function platformFindings(ctx: AnalysisContext): Finding[] {
   if (agents.length > 0) {
     findings.push({
       ruleId: "ai-agent-tooling",
-      dimension: "provenance",
+      dimension: "authorship",
       severity: "info",
       confidence: "certain",
       source: "builtin",

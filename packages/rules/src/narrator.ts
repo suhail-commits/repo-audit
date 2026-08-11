@@ -1,6 +1,6 @@
 import {
   confidencePhrase,
-  provenanceBand,
+  authorshipBand,
   severityRank,
   type DimensionScore,
   type Finding,
@@ -81,18 +81,18 @@ export class TemplateNarrator implements Narrator {
    * measured, which is the line that keeps this from becoming an opinion column.
    */
   private verdict(result: ScanResult, persona: Persona): string {
-    const provenance = result.scores.find((s) => s.dimension === "provenance");
-    if (!provenance) return "";
+    const authorship = result.scores.find((s) => s.dimension === "authorship");
+    if (!authorship) return "";
 
-    const band = provenanceBand(provenance.score);
+    const band = authorshipBand(authorship.score);
     const findings = result.findings.filter((f) => f.severity !== "info").length;
-    const measured = provenance.signals.filter((s) => s.available).length;
-    const total = provenance.signals.length;
+    const measured = authorship.signals.filter((s) => s.available).length;
+    const total = authorship.signals.length;
     const thin = measured < total * 0.6;
 
     if (persona === "engineer") {
       const parts = [
-        `Provenance ${provenance.score}/100 (${band}), ${measured}/${total} signals.`,
+        `Authorship ${authorship.score}/100 (${band}), ${measured}/${total} signals.`,
       ];
       parts.push(
         findings === 0
@@ -148,16 +148,16 @@ export class TemplateNarrator implements Narrator {
   }
 
   private scoreHeadline(score: DimensionScore, persona: Persona): string {
-    if (score.dimension !== "provenance") {
+    if (score.dimension !== "authorship") {
       return `${score.dimension}: ${score.score}/100`;
     }
 
-    const band = provenanceBand(score.score);
+    const band = authorshipBand(score.score);
 
     if (persona === "engineer") {
       const available = score.signals.filter((s) => s.available).length;
       return (
-        `Provenance ${score.score}/100 — ${band} to be AI-generated ` +
+        `Authorship ${score.score}/100 — ${band} to be AI-generated ` +
         `(${score.confidence} confidence, ${available}/${score.signals.length} signals available)`
       );
     }

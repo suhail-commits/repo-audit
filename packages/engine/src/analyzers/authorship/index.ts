@@ -29,7 +29,7 @@ import {
 } from "./platform";
 import { agentTrailerSignal, attributedAgents } from "./trailers";
 
-export interface ProvenanceResult {
+export interface AuthorshipResult {
   score: DimensionScore;
   findings: Finding[];
   /** Agents named in commit history, if any. */
@@ -52,15 +52,15 @@ const GROUND_TRUTH = ["agent-trailers", "builder-platform", "agent-tooling"];
  */
 export const GROUND_TRUTH_SIGNAL_IDS = GROUND_TRUTH;
 
-export interface ProvenanceOptions {
+export interface AuthorshipOptions {
   /** Drop ground-truth signals. Used by calibration tests. */
   structuralOnly?: boolean;
 }
 
-export function analyzeProvenance(
+export function analyzeAuthorship(
   ctx: AnalysisContext,
-  options: ProvenanceOptions = {},
-): ProvenanceResult {
+  options: AuthorshipOptions = {},
+): AuthorshipResult {
   const clones = analyzeClones(ctx);
 
   const signals: Signal[] = [
@@ -87,7 +87,7 @@ export function analyzeProvenance(
     ? signals.filter((s) => !GROUND_TRUTH.includes(s.id))
     : signals;
 
-  const score = scoreDimension("provenance", used, {
+  const score = scoreDimension("authorship", used, {
     groundTruthSignals: options.structuralOnly ? [] : GROUND_TRUTH,
   });
 
@@ -101,7 +101,7 @@ export function analyzeProvenance(
   if (agents.length > 0) {
     findings.unshift({
       ruleId: "ai-authored-commits",
-      dimension: "provenance",
+      dimension: "authorship",
       severity: "info",
       confidence: "certain",
       source: "builtin",

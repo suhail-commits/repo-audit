@@ -38,7 +38,7 @@ export const RULE_TEMPLATES: Record<string, RuleTemplate> = {
     engineer: {
       body: (d) =>
         `Agent attribution found in commit metadata: ${list(arr(d, "agents"))}. ` +
-        `Ground truth, not inference — provenance confidence is reported as certain.`,
+        `Ground truth, not inference — authorship confidence is reported as certain.`,
     },
     acquirer: {
       body: (d) =>
@@ -85,7 +85,7 @@ export const RULE_TEMPLATES: Record<string, RuleTemplate> = {
     acquirer: {
       body: (d) =>
         `Developed with ${list(arr(d, "tools"))}. ` +
-        `Weigh the provenance score and any security findings accordingly; the tooling itself is not a defect.`,
+        `Weigh the authorship score and any security findings accordingly; the tooling itself is not a defect.`,
     },
   },
 

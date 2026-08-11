@@ -4,7 +4,7 @@ import path from "node:path";
 
 import type { ArchitectureAssessment, Metric, ScanResult } from "@vibe/shared";
 
-import { analyzeProvenance, type ProvenanceOptions } from "./analyzers/provenance/index";
+import { analyzeAuthorship, type AuthorshipOptions } from "./analyzers/authorship/index";
 import type { AnalysisContext } from "./analyzers/context";
 import {
   GitHubError,
@@ -23,7 +23,7 @@ import { profileLanguages } from "./index/language";
 import { PythonIndex } from "./index/python";
 import { RouteTable } from "./index/routes";
 
-export interface ScanOptions extends ProvenanceOptions {
+export interface ScanOptions extends AuthorshipOptions {
   /** How the source arrived; determines which signals are possible. */
   kind: "github" | "zip";
   /** Display name — "owner/repo" or the uploaded filename. */
@@ -73,7 +73,7 @@ export async function scanRepository(
     rootPath,
     options.git ? { git: options.git } : {},
   );
-  const provenance = analyzeProvenance(ctx, options);
+  const authorship = analyzeAuthorship(ctx, options);
 
   const warnings = [
     ...ctx.files.warnings,
@@ -98,16 +98,16 @@ export async function scanRepository(
       languages: ctx.languages.shares,
       analysisTier: ctx.languages.dominantTier,
     },
-    scores: [provenance.score],
-    findings: provenance.findings,
-    metrics: collectMetrics(ctx, provenance.clones.clonedFunctions),
+    scores: [authorship.score],
+    findings: authorship.findings,
+    metrics: collectMetrics(ctx, authorship.clones.clonedFunctions),
     architecture: PENDING_ARCHITECTURE,
     durationMs: Date.now() - started,
     warnings,
   };
 }
 
-export interface GitHubScanOptions extends GitHubOptions, ProvenanceOptions {
+export interface GitHubScanOptions extends GitHubOptions, AuthorshipOptions {
   /**
    * Refuse repositories larger than this, in kilobytes as GitHub reports them.
    * A size gate up front produces an honest error; without one a large repo
@@ -274,14 +274,14 @@ function collectMetrics(ctx: AnalysisContext, clonedFunctions: number): Metric[]
     },
     {
       id: "duplicate-functions",
-      dimension: "provenance",
+      dimension: "authorship",
       label: "Structurally duplicated functions",
       value: clonedFunctions,
       unit: "count",
     },
     {
       id: "commits",
-      dimension: "provenance",
+      dimension: "authorship",
       label: "Commits analyzed",
       value: ctx.git.commitCount,
       unit: "count",

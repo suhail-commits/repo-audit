@@ -1,12 +1,12 @@
 import type { Confidence } from "./types";
 
 /**
- * Plain-English band for a provenance score.
+ * Plain-English band for an authorship score.
  *
  * Lives in shared because both the engine (CLI output) and the rules package
  * (report prose) need the same thresholds — two copies would drift.
  */
-export type ProvenanceBand = "unlikely" | "possible" | "likely" | "near-certain";
+export type AuthorshipBand = "unlikely" | "possible" | "likely" | "near-certain";
 
 /**
  * The bands as a scale, lowest first, with the score each one starts at.
@@ -15,8 +15,8 @@ export type ProvenanceBand = "unlikely" | "possible" | "likely" | "near-certain"
  * numbers in a component. A reader shown "15 / 100" with no scale cannot tell
  * whether high means more AI or less, or whether 15 is normal.
  */
-export const PROVENANCE_BANDS: readonly {
-  band: ProvenanceBand;
+export const AUTHORSHIP_BANDS: readonly {
+  band: AuthorshipBand;
   /** Inclusive lower bound, 0-100. */
   from: number;
   label: string;
@@ -27,7 +27,7 @@ export const PROVENANCE_BANDS: readonly {
   { band: "near-certain", from: 75, label: "near certain" },
 ];
 
-export function provenanceBand(score: number): ProvenanceBand {
+export function authorshipBand(score: number): AuthorshipBand {
   if (score >= 75) return "near-certain";
   if (score >= 50) return "likely";
   if (score >= 30) return "possible";

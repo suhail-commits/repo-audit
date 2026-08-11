@@ -71,4 +71,4 @@ export function scoreDimension(
 }
 
 // Band thresholds live in @vibe/shared so the CLI and the report prose agree.
-export { provenanceBand, type ProvenanceBand } from "@vibe/shared";
+export { authorshipBand, type AuthorshipBand } from "@vibe/shared";

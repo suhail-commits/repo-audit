@@ -1,4 +1,4 @@
-import { PROVENANCE_BANDS, provenanceBand } from "@vibe/shared";
+import { AUTHORSHIP_BANDS, authorshipBand } from "@vibe/shared";
 
 /**
  * The score, and a scale that tells the reader what the number means.
@@ -19,7 +19,7 @@ export function ScoreScale({
   score: number;
   caption: string;
 }) {
-  const current = provenanceBand(score);
+  const current = authorshipBand(score);
   const position = Math.min(100, Math.max(0, score));
 
   return (
@@ -35,8 +35,8 @@ export function ScoreScale({
         role="img"
         aria-label={`${score} out of 100 — ${current.replace("-", " ")} to be AI-generated`}
       >
-        {PROVENANCE_BANDS.map((band, i) => {
-          const next = PROVENANCE_BANDS[i + 1];
+        {AUTHORSHIP_BANDS.map((band, i) => {
+          const next = AUTHORSHIP_BANDS[i + 1];
           const width = (next ? next.from : 100) - band.from;
           return (
             <span

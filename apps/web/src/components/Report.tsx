@@ -12,10 +12,10 @@ const PERSONA_LABELS: Record<Persona, string> = {
   acquirer: "Buyer",
 };
 
-/** What the provenance number is measuring, said in the reader's register. */
+/** What the authorship number is measuring, said in the reader's register. */
 const SCORE_CAPTION: Record<Persona, string> = {
   founder: "how much looks AI-written",
-  engineer: "provenance",
+  engineer: "authorship",
   acquirer: "AI-generation likelihood",
 };
 
@@ -31,10 +31,10 @@ export function Report({
   const report = narrator.report(result, persona);
   // The narrator carries prose; the breakdown needs the raw signals, which only
   // live on the scan result.
-  const provenance = result.scores.find((s) => s.dimension === "provenance");
+  const authorship = result.scores.find((s) => s.dimension === "authorship");
 
-  const measured = provenance?.signals.filter((s) => s.available).length ?? 0;
-  const total = provenance?.signals.length ?? 0;
+  const measured = authorship?.signals.filter((s) => s.available).length ?? 0;
+  const total = authorship?.signals.length ?? 0;
 
   /*
    * Only actionable findings get listed. An `info` finding like "configured for
@@ -71,10 +71,10 @@ export function Report({
         <p>{report.summary}</p>
       </section>
 
-      {provenance ? (
+      {authorship ? (
         <section className="score-panel">
           <ScoreScale
-            score={provenance.score}
+            score={authorship.score}
             caption={SCORE_CAPTION[persona]}
           />
 
@@ -161,13 +161,13 @@ export function Report({
         the bars summing to the score are this tool's strongest argument that it
         is measuring rather than guessing.
       */}
-      {provenance ? (
+      {authorship ? (
         <details className="breakdown-details">
           <summary>
             How we worked this out
             <span className="meta"> — every check, and what it contributed</span>
           </summary>
-          <SignalBreakdown score={provenance} persona={persona} />
+          <SignalBreakdown score={authorship} persona={persona} />
         </details>
       ) : null}
 

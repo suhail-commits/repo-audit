@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 
 import { isValidSlug } from "./ingest/github";
-import { provenanceBand } from "./score/index";
+import { authorshipBand } from "./score/index";
 import { scanGitHubRepository, scanRepository } from "./scan";
 
 /**
@@ -63,8 +63,8 @@ async function main(): Promise<void> {
     console.log(
       `\n${score.dimension.toUpperCase()}  ${score.score}/100  ` +
         `(${score.confidence} confidence` +
-        (score.dimension === "provenance"
-          ? `, ${provenanceBand(score.score)} to be AI-generated)`
+        (score.dimension === "authorship"
+          ? `, ${authorshipBand(score.score)} to be AI-generated)`
           : ")"),
     );
 
