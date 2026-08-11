@@ -1,0 +1,23 @@
+node_modules/
+dist/
+.next/
+*.tsbuildinfo
+.env
+.env.local
+.DS_Store
+
+# SQLite database, plus cloned/extracted repos under analysis.
+.data/
+/tmp/
+/.scans/
+
+# Calibration corpus is cloned on demand, not vendored.
+/fixtures/corpus/
+
+# Local env — deny everything, then allow the committed template back in.
+# `.env` and `.env.local` alone would still let `.env.production` through.
+.env*
+!.env.example
+
+.vercel/
+coverage/

@@ -1,0 +1,23 @@
+{
+  "name": "@vibe/engine",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing/fixture-repo.ts"
+  },
+  "dependencies": {
+    "@vibe/shared": "workspace:*",
+    "oxc-parser": "^0.143.0",
+    "oxc-resolver": "^11.24.2",
+    "tar-stream": "^3.2.0",
+    "tree-sitter-wasms": "^0.1.13",
+    "web-tree-sitter": "0.24.7"
+  },
+  "devDependencies": {
+    "@types/tar-stream": "^3.1.4"
+  }
+}

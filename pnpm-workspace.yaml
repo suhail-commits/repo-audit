@@ -1,0 +1,6 @@
+packages:
+  - "packages/*"
+  - "apps/*"
+allowBuilds:
+  # esbuild's postinstall fetches its platform binary; tsx and vitest need it.
+  esbuild: true

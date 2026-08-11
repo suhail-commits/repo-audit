@@ -1,0 +1,22 @@
+{
+  "name": "vibe",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.0.8",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -b --pretty && pnpm --filter @vibe/web typecheck",
+    "scan": "tsx packages/engine/src/cli.ts",
+    "report": "tsx packages/rules/src/cli.ts",
+    "web": "pnpm --filter @vibe/web dev",
+    "seed": "pnpm --filter @vibe/web seed",
+    "sweep": "tsx scripts/false-positive-sweep.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
