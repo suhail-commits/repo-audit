@@ -117,7 +117,7 @@ export const RULE_TEMPLATES: Record<string, RuleTemplate> = {
   },
 
   "unused-dependencies": {
-    title: (d) => `${num(d, "count")} unused dependencies`,
+    title: (d) => `${countOf(num(d, "count"), "unused dependency", "unused dependencies")}`,
     founder: {
       body: (d) =>
         `Your project installs ${countOf(num(d, "count"), "package")} it never actually uses ` +

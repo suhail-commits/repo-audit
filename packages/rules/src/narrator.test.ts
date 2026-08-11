@@ -4,6 +4,7 @@ import type { Finding, ScanResult } from "@vibe/shared";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { TemplateNarrator } from "./narrator";
+import { signalLabel, labelledSignalIds } from "./signal-labels";
 import { FALLBACK_TEMPLATE, templateFor, templatedRuleIds } from "./templates";
 
 const narrator = new TemplateNarrator();
@@ -83,6 +84,42 @@ describe("template coverage", () => {
     ).toEqual([]);
   });
 
+  it("has a plain-language label for every signal the engine emits", async () => {
+    /*
+     * Same shape as the template-coverage test above, and for the same reason:
+     * without it a new signal ships showing its raw id — "write-once-files" —
+     * to someone reading a report about their own repository.
+     */
+    const repo = createFixtureRepo({
+      commits: [{ message: "feat: build it", files: VIBE_FILES }],
+    });
+    cleanup = repo.cleanup;
+
+    const ctx = await buildContext(repo.rootPath);
+    const emitted = analyzeProvenance(ctx).score.signals.map((s) => s.id);
+    expect(emitted.length).toBeGreaterThan(0);
+
+    const labelled = new Set(labelledSignalIds());
+    const missing = emitted.filter((id) => !labelled.has(id));
+    expect(
+      missing,
+      `these signals have no label: ${missing.join(", ")}`,
+    ).toEqual([]);
+  });
+
+  it("gives the owner plain words and the engineer the signal id", () => {
+    expect(signalLabel("write-once-files", "founder").label).toBe(
+      "Files never revisited",
+    );
+    expect(signalLabel("write-once-files", "engineer").label).toBe(
+      "write-once-files",
+    );
+    // The explanation is shared; only the name changes register.
+    expect(signalLabel("write-once-files", "engineer").explains).toBe(
+      signalLabel("write-once-files", "founder").explains,
+    );
+  });
+
   it("lists its templated rules", () => {
     expect(templatedRuleIds()).toContain("duplicate-function");
   });
@@ -154,6 +191,10 @@ describe("persona voice", () => {
   });
 });
 
+function signalStub(id: string, value: number) {
+  return { id, value, weight: 2, available: true, evidence: [] };
+}
+
 describe("score narration", () => {
   function scanResultWith(scores: ScanResult["scores"]): ScanResult {
     return {
@@ -206,8 +247,17 @@ describe("score narration", () => {
     ]);
 
     const report = narrator.report(result, "founder");
-    // The single most important honesty guarantee in the whole report.
-    expect(report.scores[0]!.caveats.join(" ")).toMatch(/not that the code is cleaner/i);
+    /*
+     * The single most important honesty guarantee in the whole report: a low
+     * score caused by missing evidence must never read as a clean bill of
+     * health. Asserted on meaning rather than exact phrasing, so rewording the
+     * copy does not break the test while dropping the guarantee would.
+     */
+    const caveats = report.scores[0]!.caveats.join(" ");
+    const lower = caveats.toLowerCase();
+    expect(lower).toContain("not");
+    expect(lower).toContain("clean");
+    expect(caveats).toMatch(/no git history in the uploaded source/i);
   });
 
   it("gives the founder a verdict sentence and the engineer a measurement", () => {
@@ -323,6 +373,82 @@ describe("score narration", () => {
 
     const evidence = narrator.report(result, "engineer").scores[0]!.evidence;
     expect(evidence).toEqual(["8 of 10 functions are duplicates."]);
+  });
+
+  it("tells a clean repo there is nothing to do, in each register", () => {
+    const result = scanResultWith([
+      {
+        dimension: "provenance",
+        score: 4,
+        confidence: "high",
+        signals: [
+          signalStub("agent-tooling", 0),
+          signalStub("duplicate-logic", 0),
+        ],
+        unavailable: [],
+      },
+    ]);
+
+    expect(narrator.report(result, "founder").verdict).toMatch(
+      /nothing here needs your attention/i,
+    );
+    expect(narrator.report(result, "engineer").verdict).toMatch(/no actionable findings/i);
+    expect(narrator.report(result, "acquirer").verdict).toMatch(
+      /no remediation was identified/i,
+    );
+  });
+
+  it("says the reading is provisional when most checks could not run", () => {
+    const result = scanResultWith([
+      {
+        dimension: "provenance",
+        score: 10,
+        confidence: "low",
+        signals: [
+          signalStub("agent-tooling", 0),
+          { ...signalStub("commit-size", 0), available: false, unavailableReason: "no history" },
+          { ...signalStub("commit-messages", 0), available: false, unavailableReason: "no history" },
+          { ...signalStub("build-velocity", 0), available: false, unavailableReason: "no history" },
+        ],
+        unavailable: ["no history"],
+      },
+    ]);
+
+    // 1 of 4 measured — the verdict must not read as a settled answer.
+    expect(narrator.report(result, "founder").verdict).toMatch(/first impression/i);
+    expect(narrator.report(result, "engineer").verdict).toMatch(/coverage is thin/i);
+    expect(narrator.report(result, "acquirer").verdict).toMatch(/indicative/i);
+  });
+
+  it("counts only actionable findings, not informational ones", () => {
+    const result = scanResultWith([
+      {
+        dimension: "provenance",
+        score: 4,
+        confidence: "high",
+        signals: [signalStub("agent-tooling", 1)],
+        unavailable: [],
+      },
+    ]);
+    // An "AI tooling is configured" note is information, not a task.
+    result.findings = [
+      {
+        ruleId: "ai-agent-tooling",
+        dimension: "provenance",
+        severity: "info",
+        confidence: "certain",
+        source: "builtin",
+        title: "Configured for AI-assisted development",
+        locations: [],
+        data: { tools: ["Claude Code"], evidence: ["`CLAUDE.md` present"] },
+      },
+    ];
+
+    // An informational note is context, not a task, so the reader is told there
+    // is nothing to act on.
+    expect(narrator.report(result, "founder").verdict).toMatch(
+      /nothing here needs your attention/i,
+    );
   });
 
   it("orders findings worst-first", () => {

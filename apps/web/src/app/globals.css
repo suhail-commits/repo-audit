@@ -575,19 +575,163 @@ button:disabled {
 }
 
 .score-panel {
-  display: grid;
-  gap: var(--sp-5);
   padding: var(--sp-5) 0 var(--sp-6);
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   margin-bottom: var(--sp-6);
 }
 
-@media (min-width: 900px) {
-  .score-panel {
-    grid-template-columns: minmax(0, 15rem) minmax(0, 1fr);
-    gap: var(--sp-7);
+/* ---- score scale ----
+   The number alone is unreadable: nothing tells you whether high means more AI
+   or less. The track is neutral and only the marker carries colour — a red high
+   end would assert that AI-generated code is bad, which is not this tool's call. */
+
+.scale-head {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-4);
+}
+
+.scale-caption {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  font-family: var(--mono);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.scale-track {
+  position: relative;
+  display: flex;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface-sunken);
+  margin-bottom: var(--sp-4);
+}
+
+.scale-band {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  border-right: 2px solid var(--bg);
+}
+
+.scale-band:last-of-type {
+  border-right: 0;
+}
+
+.scale-band.is-current {
+  background: var(--accent-soft);
+}
+
+.scale-band-label {
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 var(--sp-1);
+}
+
+.scale-band.is-current .scale-band-label {
+  color: var(--text);
+  font-weight: 620;
+}
+
+.scale-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  margin-left: -1.5px;
+  background: var(--accent);
+  border-radius: 2px;
+}
+
+/* Below 420px four labels cannot fit; the marker and the highlighted band
+   still carry the reading, so the words step back rather than collide. */
+@media (max-width: 419px) {
+  .scale-band-label {
+    font-size: 0.6rem;
   }
+  .scale-band:not(.is-current) .scale-band-label {
+    opacity: 0;
+  }
+}
+
+.coverage {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  margin: 0 0 var(--sp-3);
+}
+
+.verdict-line {
+  margin: 0;
+  font-size: var(--step-1);
+  color: var(--text);
+  max-width: var(--measure);
+}
+
+.evidence-panel {
+  margin-bottom: var(--sp-6);
+}
+
+.evidence-panel h3 {
+  font-size: var(--step-1);
+  margin: 0 0 var(--sp-3);
+}
+
+/* ---- persona switcher ---- */
+
+.persona-switch {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.persona-switch-label {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+}
+
+@media (max-width: 559px) {
+  .persona-switch-label {
+    display: none;
+  }
+}
+
+/* ---- collapsed breakdown ---- */
+
+.breakdown-details {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: var(--sp-4) var(--sp-5);
+  margin-top: var(--sp-6);
+}
+
+.breakdown-details > summary {
+  cursor: pointer;
+  font-weight: 620;
+  list-style-position: outside;
+}
+
+.breakdown-details > summary::marker {
+  color: var(--text-muted);
+}
+
+.breakdown-details[open] > summary {
+  margin-bottom: var(--sp-4);
+}
+
+.breakdown-details .section-head {
+  display: none;
 }
 
 .score-hero {

@@ -1,6 +1,7 @@
 import { TemplateNarrator } from "@vibe/rules";
 import { PERSONAS, type Persona, type ScanResult } from "@vibe/shared";
 
+import { ScoreScale } from "@/components/ScoreScale";
 import { SignalBreakdown } from "@/components/SignalBreakdown";
 
 const narrator = new TemplateNarrator();
@@ -9,6 +10,13 @@ const PERSONA_LABELS: Record<Persona, string> = {
   founder: "Owner",
   engineer: "Engineer",
   acquirer: "Buyer",
+};
+
+/** What the provenance number is measuring, said in the reader's register. */
+const SCORE_CAPTION: Record<Persona, string> = {
+  founder: "how much looks AI-written",
+  engineer: "provenance",
+  acquirer: "AI-generation likelihood",
 };
 
 export function Report({
@@ -25,21 +33,37 @@ export function Report({
   // live on the scan result.
   const provenance = result.scores.find((s) => s.dimension === "provenance");
 
+  const measured = provenance?.signals.filter((s) => s.available).length ?? 0;
+  const total = provenance?.signals.length ?? 0;
+
+  /*
+   * Only actionable findings get listed. An `info` finding like "configured for
+   * AI-assisted development" is context, and the same fact already appears in
+   * the evidence list above — showing it again duplicated the statement and made
+   * the section count disagree with the verdict's count.
+   */
+  const actionable = report.findings.filter((f) => f.severity !== "info");
+
   return (
     <main>
       <div className="report-head">
         <span className="meta">{result.repo.name}</span>
-        <nav className="personas" aria-label="Report detail level">
-          {PERSONAS.map((option) => (
-            <a
-              key={option}
-              href={`/scan/${scanId}?persona=${option}`}
-              aria-current={option === persona}
-            >
-              {PERSONA_LABELS[option]}
-            </a>
-          ))}
-        </nav>
+        <div className="persona-switch">
+          <span className="persona-switch-label" id="persona-label">
+            Explain this for
+          </span>
+          <nav className="personas" aria-labelledby="persona-label">
+            {PERSONAS.map((option) => (
+              <a
+                key={option}
+                href={`/scan/${scanId}?persona=${option}`}
+                aria-current={option === persona}
+              >
+                {PERSONA_LABELS[option]}
+              </a>
+            ))}
+          </nav>
+        </div>
       </div>
 
       <section className="verdict">
@@ -47,48 +71,60 @@ export function Report({
         <p>{report.summary}</p>
       </section>
 
+      {provenance ? (
+        <section className="score-panel">
+          <ScoreScale
+            score={provenance.score}
+            caption={SCORE_CAPTION[persona]}
+          />
+
+          {/*
+            Coverage stated as a fact, not a failure. "Some checks could not run"
+            reads like something broke; it is only a statement about how much
+            evidence the repository made available.
+          */}
+          <p className="coverage">
+            Based on {measured} of {total} checks
+            {total - measured > 0
+              ? ` — ${total - measured} needed evidence this repository doesn't have.`
+              : "."}
+          </p>
+
+          <p className="verdict-line">{report.verdict}</p>
+        </section>
+      ) : null}
+
       {report.scores.map((score) => (
-        <section className="score-panel" key={score.dimension}>
-          <div>
-            <div className="score-hero">
-              <span className="score-value">{score.score}</span>
-              <span className="score-of">/ 100</span>
-            </div>
-            <span className="score-caption">{score.dimension}</span>
-          </div>
+        <section className="evidence-panel" key={score.dimension}>
+          <h3>What we found</h3>
+          {score.evidence.length > 0 ? (
+            <ul className="evidence">
+              {score.evidence.map((line, i) => (
+                <li key={i}>{line}</li>
+              ))}
+            </ul>
+          ) : (
+            <p className="hint hint-flush">
+              None of our checks found anything notable.
+            </p>
+          )}
 
-          <div>
-            {score.evidence.length > 0 ? (
-              <ul className="evidence">
-                {score.evidence.map((line, i) => (
-                  <li key={i}>{line}</li>
-                ))}
-              </ul>
-            ) : (
-              <p className="hint hint-flush">
-                Nothing notable was found for this measure.
-              </p>
-            )}
-
-            {score.caveats.map((caveat, i) => (
-              <p className="caveat" key={i}>
-                {caveat}
-              </p>
-            ))}
-          </div>
+          {score.caveats.map((caveat, i) => (
+            <p className="caveat" key={i}>
+              {caveat}
+            </p>
+          ))}
         </section>
       ))}
 
-      {provenance ? <SignalBreakdown score={provenance} /> : null}
-
-      {report.findings.length > 0 ? (
+      {actionable.length > 0 ? (
         <>
           <div className="section-head">
-            <h3>What we found</h3>
-            <span className="meta">{report.findings.length}</span>
+            <h3>Worth a look</h3>
+            <span className="meta">{actionable.length}</span>
           </div>
 
-          {report.findings.map((finding, i) => (
+          {actionable.map((finding, i) => (
             <article className="finding" key={`${finding.ruleId}-${i}`}>
               <div className="finding-head">
                 <span className={`sev sev-${finding.severity}`}>
@@ -120,9 +156,24 @@ export function Report({
         </>
       ) : null}
 
+      {/*
+        Collapsed by default, but the summary has to advertise what is inside:
+        the bars summing to the score are this tool's strongest argument that it
+        is measuring rather than guessing.
+      */}
+      {provenance ? (
+        <details className="breakdown-details">
+          <summary>
+            How we worked this out
+            <span className="meta"> — every check, and what it contributed</span>
+          </summary>
+          <SignalBreakdown score={provenance} persona={persona} />
+        </details>
+      ) : null}
+
       {result.warnings.length > 0 ? (
         <div className="warnings">
-          <strong>Notes on coverage</strong>
+          <strong>What we could and couldn&rsquo;t read</strong>
           <ul>
             {result.warnings.map((warning, i) => (
               <li key={i}>{warning}</li>

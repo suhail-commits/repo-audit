@@ -65,12 +65,87 @@ export class TemplateNarrator implements Narrator {
       persona,
       headline: scores[0]?.headline ?? "No analysis was produced for this repository.",
       summary: this.summary(result, persona),
+      verdict: this.verdict(result, persona),
       scores,
       findings,
     };
   }
 
   // -------------------------------------------------------------------------
+
+  /**
+   * What the reader should take away.
+   *
+   * Every clause here is derived from a counted value — the band, how many
+   * findings exist, how many signals ran. Nothing is asserted that was not
+   * measured, which is the line that keeps this from becoming an opinion column.
+   */
+  private verdict(result: ScanResult, persona: Persona): string {
+    const provenance = result.scores.find((s) => s.dimension === "provenance");
+    if (!provenance) return "";
+
+    const band = provenanceBand(provenance.score);
+    const findings = result.findings.filter((f) => f.severity !== "info").length;
+    const measured = provenance.signals.filter((s) => s.available).length;
+    const total = provenance.signals.length;
+    const thin = measured < total * 0.6;
+
+    if (persona === "engineer") {
+      const parts = [
+        `Provenance ${provenance.score}/100 (${band}), ${measured}/${total} signals.`,
+      ];
+      parts.push(
+        findings === 0
+          ? "No actionable findings."
+          : `${countOf(findings, "actionable finding")} below.`,
+      );
+      if (thin) {
+        parts.push("Coverage is thin — treat the score as indicative.");
+      }
+      return parts.join(" ");
+    }
+
+    if (persona === "acquirer") {
+      const effort = result.findings.reduce(
+        (sum, f) => sum + (f.estimatedFixMinutes ?? 0),
+        0,
+      );
+      const base =
+        band === "unlikely" || band === "possible"
+          ? "Nothing here suggests the codebase was largely generated."
+          : "Expect a substantial share of this codebase to have been generated.";
+      const work =
+        effort === 0
+          ? "No remediation was identified."
+          : `Identified remediation is roughly ${Math.max(1, Math.round(effort / 60))} developer hours.`;
+      return thin
+        ? `${base} ${work} Coverage was limited, so treat this as indicative rather than settled.`
+        : `${base} ${work}`;
+    }
+
+    /*
+     * Owner. The opening is driven by whether there is anything to *do*, not by
+     * the band — those are different axes, and keying off the band produced
+     * "Nothing here needs your attention. We found 6 things worth fixing."
+     */
+    const opening =
+      findings === 0
+        ? "Nothing here needs your attention."
+        : findings <= 2
+          ? `${countOf(findings, "thing")} ${findings === 1 ? "is" : "are"} worth a look, but nothing alarming.`
+          : `${countOf(findings, "thing")} are worth going through.`;
+
+    const context =
+      band === "unlikely" || band === "possible"
+        ? "The code itself shows few of the patterns we associate with generated work."
+        : "The code shows several of the patterns we associate with generated work.";
+
+    const caveat = thin
+      ? " We could only run some of our checks on this project, so treat this as a first impression."
+      : "";
+
+    return `${opening} ${context}${caveat}`;
+  }
 
   private scoreHeadline(score: DimensionScore, persona: Persona): string {
     if (score.dimension !== "provenance") {
@@ -138,8 +213,8 @@ export class TemplateNarrator implements Narrator {
 
     if (persona === "founder") {
       return [
-        `Some checks could not run: ${list(reasons)}. ` +
-          `That means this score is based on less evidence than usual — not that the code is cleaner.`,
+        `A lower score from missing evidence is not a cleaner codebase — ` +
+          `it only means we had less to go on. Skipped: ${list(reasons)}.`,
       ];
     }
 

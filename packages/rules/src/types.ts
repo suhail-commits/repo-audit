@@ -39,6 +39,14 @@ export interface NarratedReport {
   /** The single sentence the report opens with. */
   headline: string;
   summary: string;
+  /**
+   * What the reader should take from this — whether anything needs attention.
+   *
+   * Composed from measured values only (the band, the finding count, coverage).
+   * This is the one place the report edges from measurement toward advice, so
+   * every clause has to trace back to something counted.
+   */
+  verdict: string;
   scores: NarratedScore[];
   findings: NarratedFinding[];
 }

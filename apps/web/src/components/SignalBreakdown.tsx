@@ -1,4 +1,5 @@
-import type { DimensionScore } from "@vibe/shared";
+import { signalLabel } from "@vibe/rules";
+import type { DimensionScore, Persona } from "@vibe/shared";
 
 /**
  * Why the score is what it is, one bar per signal.
@@ -17,7 +18,13 @@ import type { DimensionScore } from "@vibe/shared";
  * A server component: the numbers are already on the page, so the hover detail
  * rides on `title` rather than pulling a client bundle in for a tooltip.
  */
-export function SignalBreakdown({ score }: { score: DimensionScore }) {
+export function SignalBreakdown({
+  score,
+  persona,
+}: {
+  score: DimensionScore;
+  persona: Persona;
+}) {
   const available = score.signals.filter((s) => s.available);
   const totalWeight = available.reduce((sum, s) => sum + s.weight, 0);
 
@@ -59,11 +66,13 @@ export function SignalBreakdown({ score }: { score: DimensionScore }) {
             key={row.id}
             title={
               row.available
-                ? `${humanize(row.id)} — value ${row.value.toFixed(2)}, weight ${row.weight}, contributing ${row.points.toFixed(1)} of ${row.maxPoints.toFixed(1)} possible points`
-                : `${humanize(row.id)} — not measured: ${row.unavailableReason ?? "inputs unavailable"}`
+                ? `${signalLabel(row.id, persona).label} — value ${row.value.toFixed(2)}, weight ${row.weight}, contributing ${row.points.toFixed(1)} of ${row.maxPoints.toFixed(1)} possible points`
+                : `${signalLabel(row.id, persona).label} — not measured: ${row.unavailableReason ?? "inputs unavailable"}`
             }
           >
-            <span className="signal-name">{humanize(row.id)}</span>
+            <span className="signal-name" title={signalLabel(row.id, persona).explains}>
+              {signalLabel(row.id, persona).label}
+            </span>
 
             {row.available ? (
               <>
@@ -102,10 +111,4 @@ export function SignalBreakdown({ score }: { score: DimensionScore }) {
       </p>
     </section>
   );
-}
-
-/** `agent-trailers` → `Agent trailers`. */
-function humanize(id: string): string {
-  const words = id.replace(/-/g, " ");
-  return words.charAt(0).toUpperCase() + words.slice(1);
 }

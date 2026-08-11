@@ -12,3 +12,8 @@ export {
   templatedRuleIds,
   type RuleTemplate,
 } from "./templates";
+export {
+  signalLabel,
+  labelledSignalIds,
+  type SignalLabel,
+} from "./signal-labels";
