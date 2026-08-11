@@ -1,16 +1,11 @@
 import type { Confidence, Dimension, DimensionScore, Signal } from "@vibe/shared";
 
-/**
- * How strong a ground-truth signal must be before the dimension reports
- * `certain`. Matches the point at which `agent-trailers` stops scaling and
- * starts saturating, so the two thresholds cannot drift apart.
- */
-export const GROUND_TRUTH_THRESHOLD = 0.6;
-
 export interface ScoreOptions {
   /**
-   * Signals whose firing is ground truth rather than inference. When one of these
-   * fires, the dimension reports `certain` confidence regardless of coverage.
+   * Signals whose firing is ground truth rather than inference.
+   *
+   * Retained so callers can identify them (calibration disables them), but they
+   * no longer alter confidence — see below.
    */
   groundTruthSignals?: string[];
 }
@@ -29,7 +24,7 @@ export function scoreDimension(
   signals: Signal[],
   options: ScoreOptions = {},
 ): DimensionScore {
-  const groundTruth = new Set(options.groundTruthSignals ?? []);
+  void options;
 
   const available = signals.filter((s) => s.available);
   const totalWeight = signals.reduce((sum, s) => sum + s.weight, 0);
@@ -44,18 +39,27 @@ export function scoreDimension(
             100,
         );
 
-  // A ground-truth signal must be *materially* present to claim certainty, not
-  // merely nonzero. Ten agent-attributed commits in a 2,612-commit history is
-  // direct evidence that agents touched the repo — it is not evidence that the
-  // repo is agent-written, and reporting `certain` off it overstates the claim.
-  const groundTruthFired = available.some(
-    (s) => groundTruth.has(s.id) && s.value >= GROUND_TRUTH_THRESHOLD,
-  );
-
+  /*
+   * Confidence answers exactly one question: how much of the evidence could we
+   * actually gather? It is coverage, nothing else.
+   *
+   * A ground-truth signal used to force this to `certain`, which conflated two
+   * different claims. Finding a committed `CLAUDE.md` makes us certain *that a
+   * file exists*; it says nothing about how confident we are in the resulting
+   * number. `colinhacks/zod` demonstrated the incoherence — it reported
+   * "27/100, certain confidence" and narrated "this mostly looks like
+   * hand-written code" directly above "Cursor: .cursorrules present". The 27 was
+   * right; the certainty was not.
+   *
+   * Ground truth still raises the *score*, which is what it is evidence for.
+   *
+   * The dimension never claims `certain`, so the invariant that `certain` is
+   * reserved for ground truth is preserved where it belongs: on individual
+   * findings, where "this file is present" genuinely is certain.
+   */
   const coverage = totalWeight === 0 ? 0 : availableWeight / totalWeight;
   let confidence: Confidence;
-  if (groundTruthFired) confidence = "certain";
-  else if (coverage >= 0.8) confidence = "high";
+  if (coverage >= 0.8) confidence = "high";
   else if (coverage >= 0.5) confidence = "medium";
   else confidence = "low";
 
@@ -67,4 +71,4 @@ export function scoreDimension(
 }
 
 // Band thresholds live in @vibe/shared so the CLI and the report prose agree.
-export { provenanceBand, type ProvenanceBand } from "@vibe/shared";
+export { authorshipBand, type AuthorshipBand } from "@vibe/shared";

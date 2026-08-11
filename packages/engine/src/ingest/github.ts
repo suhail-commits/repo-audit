@@ -300,7 +300,7 @@ interface CommitListEntry {
 /**
  * Fetch commit history and map it onto the engine's `Commit` shape.
  *
- * `Commit[]` is the seam the whole provenance analyzer sits on — every signal
+ * `Commit[]` is the seam the whole authorship analyzer sits on — every signal
  * reads only that array — so switching the source from `git log` to the API
  * changes no analyzer.
  *

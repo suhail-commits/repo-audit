@@ -2,16 +2,18 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import type { ArchitectureAssessment, Metric, ScanResult } from "@vibe/shared";
+import type { Metric, ScanResult } from "@vibe/shared";
 
-import { analyzeProvenance, type ProvenanceOptions } from "./analyzers/provenance/index";
+import { analyzeAuthorship, type AuthorshipOptions } from "./analyzers/authorship/index";
 import type { AnalysisContext } from "./analyzers/context";
+import { analyzeHealth } from "./analyzers/health/index";
 import {
   GitHubError,
   fetchCommits,
   fetchRepoMeta,
   fetchTarball,
   type GitHubOptions,
+  type RepoMeta,
 } from "./ingest/github";
 import { AstIndex } from "./index/ast";
 import { FileIndex } from "./index/files";
@@ -22,7 +24,7 @@ import { profileLanguages } from "./index/language";
 import { PythonIndex } from "./index/python";
 import { RouteTable } from "./index/routes";
 
-export interface ScanOptions extends ProvenanceOptions {
+export interface ScanOptions extends AuthorshipOptions {
   /** How the source arrived; determines which signals are possible. */
   kind: "github" | "zip";
   /** Display name — "owner/repo" or the uploaded filename. */
@@ -72,7 +74,10 @@ export async function scanRepository(
     rootPath,
     options.git ? { git: options.git } : {},
   );
-  const provenance = analyzeProvenance(ctx, options);
+  const authorship = analyzeAuthorship(ctx, options);
+  // Health re-weights the structural signals authorship already computed rather
+  // than measuring them again — see `analyzers/health/index.ts`.
+  const health = analyzeHealth(ctx, authorship.score.signals);
 
   const warnings = [
     ...ctx.files.warnings,
@@ -97,22 +102,65 @@ export async function scanRepository(
       languages: ctx.languages.shares,
       analysisTier: ctx.languages.dominantTier,
     },
-    scores: [provenance.score],
-    findings: provenance.findings,
-    metrics: collectMetrics(ctx, provenance.clones.clonedFunctions),
-    architecture: PENDING_ARCHITECTURE,
+    // Authorship first: the narrator takes its headline from `scores[0]`.
+    scores: [authorship.score, health.score],
+    findings: authorship.findings,
+    metrics: collectMetrics(ctx, authorship.clones.clonedFunctions),
+    /*
+     * `security` is absent because no security analyzer exists yet — see the
+     * deferred work in README. Add it here in the same commit that registers
+     * the analyzer, so the report can never claim a check that did not run.
+     */
+    analysedDimensions: ["authorship", "health"],
     durationMs: Date.now() - started,
     warnings,
   };
 }
 
-export interface GitHubScanOptions extends GitHubOptions, ProvenanceOptions {
+export interface GitHubScanOptions extends GitHubOptions, AuthorshipOptions {
   /**
    * Refuse repositories larger than this, in kilobytes as GitHub reports them.
    * A size gate up front produces an honest error; without one a large repo
    * simply exceeds the platform's function timeout with no explanation.
    */
   maxSizeKb?: number;
+}
+
+/**
+ * May we scan this repository at all?
+ *
+ * Pure, and exported, so the two gates that must never regress can be tested
+ * without touching the network.
+ *
+ * **The privacy check runs first, and the order is deliberate.** Reporting a
+ * size for a private repository would itself disclose something about it — that
+ * it exists, and roughly how big it is. Refuse before measuring.
+ */
+export function assertScannable(meta: RepoMeta, maxSizeKb: number): void {
+  /*
+   * A deployment needs a GITHUB_TOKEN for the rate limit, and that token
+   * carries its owner's `repo` scope — so the API will return the owner's
+   * private repositories to whoever types the slug into the public form.
+   *
+   * Being *able* to read a repository is never the same as the visitor being
+   * *authorised* to. Without this the form becomes a lookup service for every
+   * private repo the deploy token can reach, returning file paths, function
+   * names and verbatim comment text.
+   */
+  if (meta.isPrivate) {
+    throw new GitHubError(
+      "That repository is private. This scanner reads public repositories only.",
+      403,
+    );
+  }
+
+  if (meta.sizeKb > maxSizeKb) {
+    throw new GitHubError(
+      `That repository is ${Math.round(meta.sizeKb / 1024)}MB, larger than the ` +
+        `${Math.round(maxSizeKb / 1024)}MB limit this scanner accepts.`,
+      413,
+    );
+  }
 }
 
 /**
@@ -132,13 +180,7 @@ export async function scanGitHubRepository(
   const maxSizeKb = options.maxSizeKb ?? 150_000;
 
   const meta = await fetchRepoMeta(slug, options);
-  if (meta.sizeKb > maxSizeKb) {
-    throw new GitHubError(
-      `That repository is ${Math.round(meta.sizeKb / 1024)}MB, larger than the ` +
-        `${Math.round(maxSizeKb / 1024)}MB limit this scanner accepts.`,
-      413,
-    );
-  }
+  assertScannable(meta, maxSizeKb);
 
   const workdir = await mkdtemp(path.join(tmpdir(), "repo-audit-"));
 
@@ -164,19 +206,6 @@ export async function scanGitHubRepository(
     await rm(workdir, { recursive: true, force: true }).catch(() => {});
   }
 }
-
-/**
- * The architecture analyzer lands in a later phase. It reports
- * `insufficient-evidence` rather than a verdict so the report never implies an
- * assessment that was not actually performed.
- */
-const PENDING_ARCHITECTURE: ArchitectureAssessment = {
-  verdict: "insufficient-evidence",
-  modularity: 0,
-  moduleCount: 0,
-  serviceCount: 0,
-  evidence: ["Architecture analysis is not yet implemented"],
-};
 
 /**
  * Say plainly which parts of the repository could not be read.
@@ -214,14 +243,14 @@ function collectMetrics(ctx: AnalysisContext, clonedFunctions: number): Metric[]
   return [
     {
       id: "source-files",
-      dimension: "quality",
+      dimension: "health",
       label: "Source files",
       value: ctx.files.sourceFiles().length,
       unit: "count",
     },
     {
       id: "source-lines",
-      dimension: "quality",
+      dimension: "health",
       label: "Lines of source",
       value: ctx.files.totalSloc,
       unit: "loc",
@@ -241,15 +270,20 @@ function collectMetrics(ctx: AnalysisContext, clonedFunctions: number): Metric[]
       unit: "count",
     },
     {
+      /*
+       * Health, not authorship: the duplication *findings* are filed under
+       * health, and a count sitting in one section while the findings it
+       * counts sit in another reads as two different measurements.
+       */
       id: "duplicate-functions",
-      dimension: "provenance",
+      dimension: "health",
       label: "Structurally duplicated functions",
       value: clonedFunctions,
       unit: "count",
     },
     {
       id: "commits",
-      dimension: "provenance",
+      dimension: "authorship",
       label: "Commits analyzed",
       value: ctx.git.commitCount,
       unit: "count",

@@ -157,10 +157,43 @@ build, no test run, no git hooks. Archives are extracted with path-traversal rej
 rejection, and expansion caps; oversized repositories are refused up front rather than being allowed
 to exhaust a function timeout.
 
+## What this cannot see
+
+Worth stating plainly, because a scanner that hides its blind spots is worse than one that names
+them.
+
+**It only reads what is committed.** Plenty of people gitignore `CLAUDE.md` or `.cursorrules`. Those
+repositories look untooled to us, because from the outside they are.
+
+**It is not adversarial-proof.** Delete the agent config, strip the commit trailers, and the two
+strongest signals go quiet. The structural ones — duplicated logic, comments restating the line
+below, convention drift between files — are harder to erase, but nothing here survives someone who
+sets out to defeat it. This measures ordinary repositories honestly; it is not a forensic tool.
+
+**A short or squashed history removes four signals.** Commit size, message entropy, build velocity
+and write-once files all need a real history. Squash-merge everything, or start version control
+last week, and they report unavailable.
+
+**The worked example is this repository.** Before agent-config detection existed, scanning it
+returned **0/100, "unlikely to be AI-generated"** — while three agent config files sat tracked in
+the tree and every commit deliberately carried no AI attribution. The score was a faithful
+measurement of the evidence available and a poor description of reality. Both things are true at
+once, and that gap is the honest limit of this approach.
+
+**A low score is not a clean bill of health.** It means the usual patterns were not found. On a
+carefully written codebase — whoever or whatever wrote it — that is exactly what you would expect.
+
 ## Status
 
-Provenance analysis is complete and calibrated. Security analysis — route-level auth coverage,
-missing tenant filters, exposed secrets — is the next piece, and is deliberately JavaScript and
-TypeScript only, because those rules need framework semantics rather than syntax.
-`ScanResult.architecture` returns `insufficient-evidence` rather than inventing a verdict for an
-analyzer that has not been written.
+The report is three sections: **authorship** (how much looks AI-written), **security**, and
+**health** (duplication, dead code, test quality, structure).
+
+Authorship analysis is complete and calibrated, and health is populated from the structural
+signals. Security analysis — exposed secrets, route-level auth coverage, dangerous sinks — is the
+next piece; secrets detection works on any language, the rest is deliberately JavaScript and
+TypeScript only because those rules need framework semantics rather than syntax.
+
+The Security section renders as **"not analysed yet"** rather than being hidden. An absent section
+reads as a clean bill of health, and only one of those is true. `ScanResult.analysedDimensions`
+records which dimensions an analyzer actually ran for, because a dimension that ran and found
+nothing produces output identical to one that never looked.

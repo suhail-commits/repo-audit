@@ -275,7 +275,7 @@ export function cloneFindings(report: CloneReport, limit = 10): Finding[] {
       const names = [...new Set(family.members.map((m) => m.name))];
       return {
         ruleId: "duplicate-function",
-        dimension: "provenance" as const,
+        dimension: "health" as const,
         severity: family.members.length >= 4 ? ("medium" as const) : ("low" as const),
         confidence: "high" as const,
         source: "builtin" as const,

@@ -30,7 +30,7 @@ export interface Commit {
  * Git history for the repo under analysis.
  *
  * When history is unavailable — a zip upload with no `.git`, or a repo with a
- * single commit — `available` is false. Consumers must degrade the provenance
+ * single commit — `available` is false. Consumers must degrade the authorship
  * score's *confidence* rather than treating missing history as a clean signal.
  */
 export class GitIndex {
@@ -65,7 +65,7 @@ export class GitIndex {
    * Build from commits obtained somewhere other than a local checkout — the
    * GitHub API today.
    *
-   * `Commit[]` is the seam the provenance analyzer sits on: every signal reads
+   * `Commit[]` is the seam the authorship analyzer sits on: every signal reads
    * only that array, so changing where history comes from changes no analyzer.
    */
   static fromCommits(

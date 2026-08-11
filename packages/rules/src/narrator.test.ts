@@ -1,9 +1,10 @@
-import { buildContext, analyzeProvenance } from "@vibe/engine";
+import { buildContext, analyzeAuthorship, analyzeHealth } from "@vibe/engine";
 import { createFixtureRepo } from "@vibe/engine/testing";
 import type { Finding, ScanResult } from "@vibe/shared";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { TemplateNarrator } from "./narrator";
+import { signalLabel, labelledSignalIds } from "./signal-labels";
 import { FALLBACK_TEMPLATE, templateFor, templatedRuleIds } from "./templates";
 
 const narrator = new TemplateNarrator();
@@ -62,7 +63,7 @@ async function findingsFor(
   cleanup = repo.cleanup;
 
   const ctx = await buildContext(repo.rootPath);
-  return analyzeProvenance(ctx).findings;
+  return analyzeAuthorship(ctx).findings;
 }
 
 describe("template coverage", () => {
@@ -83,6 +84,51 @@ describe("template coverage", () => {
     ).toEqual([]);
   });
 
+  it("has a plain-language label for every signal the engine emits", async () => {
+    /*
+     * Same shape as the template-coverage test above, and for the same reason:
+     * without it a new signal ships showing its raw id — "write-once-files" —
+     * to someone reading a report about their own repository.
+     */
+    const repo = createFixtureRepo({
+      commits: [{ message: "feat: build it", files: VIBE_FILES }],
+    });
+    cleanup = repo.cleanup;
+
+    const ctx = await buildContext(repo.rootPath);
+    const authorship = analyzeAuthorship(ctx);
+    /*
+     * Every dimension that carries a score, not just authorship. Checking one
+     * of them would have passed while `test-coverage` — a health-only signal —
+     * rendered as "Test coverage" from the id-humanising fallback.
+     */
+    const emitted = [
+      ...authorship.score.signals,
+      ...analyzeHealth(ctx, authorship.score.signals).score.signals,
+    ].map((s) => s.id);
+    expect(emitted.length).toBeGreaterThan(0);
+
+    const labelled = new Set(labelledSignalIds());
+    const missing = emitted.filter((id) => !labelled.has(id));
+    expect(
+      missing,
+      `these signals have no label: ${missing.join(", ")}`,
+    ).toEqual([]);
+  });
+
+  it("gives the owner plain words and the engineer the signal id", () => {
+    expect(signalLabel("write-once-files", "founder").label).toBe(
+      "Files never revisited",
+    );
+    expect(signalLabel("write-once-files", "engineer").label).toBe(
+      "write-once-files",
+    );
+    // The explanation is shared; only the name changes register.
+    expect(signalLabel("write-once-files", "engineer").explains).toBe(
+      signalLabel("write-once-files", "founder").explains,
+    );
+  });
+
   it("lists its templated rules", () => {
     expect(templatedRuleIds()).toContain("duplicate-function");
   });
@@ -91,7 +137,7 @@ describe("template coverage", () => {
 describe("persona voice", () => {
   const finding: Finding = {
     ruleId: "duplicate-function",
-    dimension: "provenance",
+    dimension: "authorship",
     severity: "medium",
     confidence: "high",
     source: "builtin",
@@ -154,6 +200,10 @@ describe("persona voice", () => {
   });
 });
 
+function signalStub(id: string, value: number) {
+  return { id, value, weight: 2, available: true, evidence: [] };
+}
+
 describe("score narration", () => {
   function scanResultWith(scores: ScanResult["scores"]): ScanResult {
     return {
@@ -182,13 +232,7 @@ describe("score narration", () => {
       scores,
       findings: [],
       metrics: [],
-      architecture: {
-        verdict: "insufficient-evidence",
-        modularity: 0,
-        moduleCount: 0,
-        serviceCount: 0,
-        evidence: [],
-      },
+      analysedDimensions: ["authorship" as const, "health" as const],
       durationMs: 120,
       warnings: [],
     };
@@ -197,7 +241,7 @@ describe("score narration", () => {
   it("states plainly that missing evidence does not mean clean code", () => {
     const result = scanResultWith([
       {
-        dimension: "provenance",
+        dimension: "authorship",
         score: 61,
         confidence: "medium",
         signals: [],
@@ -206,14 +250,23 @@ describe("score narration", () => {
     ]);
 
     const report = narrator.report(result, "founder");
-    // The single most important honesty guarantee in the whole report.
-    expect(report.scores[0]!.caveats.join(" ")).toMatch(/not that the code is cleaner/i);
+    /*
+     * The single most important honesty guarantee in the whole report: a low
+     * score caused by missing evidence must never read as a clean bill of
+     * health. Asserted on meaning rather than exact phrasing, so rewording the
+     * copy does not break the test while dropping the guarantee would.
+     */
+    const caveats = report.scores[0]!.caveats.join(" ");
+    const lower = caveats.toLowerCase();
+    expect(lower).toContain("not");
+    expect(lower).toContain("clean");
+    expect(caveats).toMatch(/no git history in the uploaded source/i);
   });
 
   it("gives the founder a verdict sentence and the engineer a measurement", () => {
     const result = scanResultWith([
       {
-        dimension: "provenance",
+        dimension: "authorship",
         score: 82,
         confidence: "certain",
         signals: [],
@@ -225,14 +278,72 @@ describe("score narration", () => {
       "This app was almost certainly built with AI coding tools.",
     );
     expect(narrator.report(result, "engineer").headline).toMatch(
-      /Provenance 82\/100.*near-certain.*certain confidence/,
+      /Authorship 82\/100.*near-certain.*certain confidence/,
     );
+  });
+
+  it("never says hand-written when the repo carries AI tooling evidence", () => {
+    /*
+     * The report used to headline "this mostly looks like hand-written code"
+     * directly above "Claude Code: CLAUDE.md present". A low score means the
+     * *code* shows few of the usual patterns — not that no AI was involved.
+     */
+    const result = scanResultWith([
+      {
+        dimension: "authorship",
+        score: 15,
+        confidence: "high",
+        signals: [
+          {
+            id: "agent-tooling",
+            value: 1,
+            weight: 3,
+            available: true,
+            evidence: ["Claude Code: `CLAUDE.md` present"],
+          },
+          {
+            id: "duplicate-logic",
+            value: 0,
+            weight: 2.5,
+            available: true,
+            evidence: [],
+          },
+        ],
+        unavailable: [],
+      },
+    ]);
+
+    const headline = narrator.report(result, "founder").headline;
+    expect(headline).not.toMatch(/hand-written/i);
+    expect(headline).toMatch(/AI tools were used/i);
+  });
+
+  it("still says hand-written when nothing points at AI tooling", () => {
+    const result = scanResultWith([
+      {
+        dimension: "authorship",
+        score: 4,
+        confidence: "high",
+        signals: [
+          {
+            id: "agent-tooling",
+            value: 0,
+            weight: 3,
+            available: true,
+            evidence: [],
+          },
+        ],
+        unavailable: [],
+      },
+    ]);
+
+    expect(narrator.report(result, "founder").headline).toMatch(/hand-written/i);
   });
 
   it("only cites evidence from signals that actually fired", () => {
     const result = scanResultWith([
       {
-        dimension: "provenance",
+        dimension: "authorship",
         score: 40,
         confidence: "high",
         signals: [
@@ -267,10 +378,86 @@ describe("score narration", () => {
     expect(evidence).toEqual(["8 of 10 functions are duplicates."]);
   });
 
+  it("tells a clean repo there is nothing to do, in each register", () => {
+    const result = scanResultWith([
+      {
+        dimension: "authorship",
+        score: 4,
+        confidence: "high",
+        signals: [
+          signalStub("agent-tooling", 0),
+          signalStub("duplicate-logic", 0),
+        ],
+        unavailable: [],
+      },
+    ]);
+
+    expect(narrator.report(result, "founder").verdict).toMatch(
+      /nothing here needs your attention/i,
+    );
+    expect(narrator.report(result, "engineer").verdict).toMatch(/no actionable findings/i);
+    expect(narrator.report(result, "acquirer").verdict).toMatch(
+      /no remediation was identified/i,
+    );
+  });
+
+  it("says the reading is provisional when most checks could not run", () => {
+    const result = scanResultWith([
+      {
+        dimension: "authorship",
+        score: 10,
+        confidence: "low",
+        signals: [
+          signalStub("agent-tooling", 0),
+          { ...signalStub("commit-size", 0), available: false, unavailableReason: "no history" },
+          { ...signalStub("commit-messages", 0), available: false, unavailableReason: "no history" },
+          { ...signalStub("build-velocity", 0), available: false, unavailableReason: "no history" },
+        ],
+        unavailable: ["no history"],
+      },
+    ]);
+
+    // 1 of 4 measured — the verdict must not read as a settled answer.
+    expect(narrator.report(result, "founder").verdict).toMatch(/first impression/i);
+    expect(narrator.report(result, "engineer").verdict).toMatch(/coverage is thin/i);
+    expect(narrator.report(result, "acquirer").verdict).toMatch(/indicative/i);
+  });
+
+  it("counts only actionable findings, not informational ones", () => {
+    const result = scanResultWith([
+      {
+        dimension: "authorship",
+        score: 4,
+        confidence: "high",
+        signals: [signalStub("agent-tooling", 1)],
+        unavailable: [],
+      },
+    ]);
+    // An "AI tooling is configured" note is information, not a task.
+    result.findings = [
+      {
+        ruleId: "ai-agent-tooling",
+        dimension: "authorship",
+        severity: "info",
+        confidence: "certain",
+        source: "builtin",
+        title: "Configured for AI-assisted development",
+        locations: [],
+        data: { tools: ["Claude Code"], evidence: ["`CLAUDE.md` present"] },
+      },
+    ];
+
+    // An informational note is context, not a task, so the reader is told there
+    // is nothing to act on.
+    expect(narrator.report(result, "founder").verdict).toMatch(
+      /nothing here needs your attention/i,
+    );
+  });
+
   it("orders findings worst-first", () => {
     const mk = (id: string, severity: Finding["severity"]): Finding => ({
       ruleId: id,
-      dimension: "provenance",
+      dimension: "authorship",
       severity,
       confidence: "high",
       source: "builtin",

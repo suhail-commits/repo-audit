@@ -10,7 +10,7 @@ import { scanRepository } from "../packages/engine/src/index";
  *
  * The failure mode this project must avoid is "someone technical pastes their
  * own repo and gets an obviously wrong answer". These are all well-known,
- * unambiguously hand-written repositories. Any provenance score above ~30 is a
+ * unambiguously hand-written repositories. Any authorship score above ~30 is a
  * bug to investigate, not a result.
  *
  * Clones are FULL, not shallow: a shallow clone compresses the active-day span
@@ -88,17 +88,17 @@ for (const slug of REPOS) {
 
   try {
     const result = await scanRepository(dir, { kind: "zip", name: slug });
-    const provenance = result.scores.find((s) => s.dimension === "provenance")!;
+    const authorship = result.scores.find((s) => s.dimension === "authorship")!;
 
     rows.push({
       slug,
       tier: result.repo.analysisTier,
       lang: result.repo.languages[0]?.language ?? "?",
       loc: result.repo.totalLoc,
-      score: provenance.score,
-      confidence: provenance.confidence,
+      score: authorship.score,
+      confidence: authorship.confidence,
       // Only signals contributing meaningfully to the score.
-      firing: provenance.signals
+      firing: authorship.signals
         .filter((s) => s.available && s.value > 0.3)
         .sort((a, b) => b.value * b.weight - a.value * a.weight)
         .map((s) => `${s.id}=${s.value.toFixed(2)}`),

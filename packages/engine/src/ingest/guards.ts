@@ -166,6 +166,12 @@ const GENERATED_PATH_PATTERNS = [
 
 const TEST_PATH_PATTERNS = [
   /\.(test|spec)\.[cm]?[jt]sx?$/i,
+  // `tsd` type tests: `*.test-d.ts`, conventionally under `test-d/`. Seen on
+  // `sindresorhus/execa`, where 151 of 261 files were type tests — nothing
+  // imports them, and nothing is meant to, so every one read as dead code and
+  // pushed both `orphan-files` and the health score up on a well-kept repo.
+  /\.test-d\.[cm]?tsx?$/i,
+  /(^|[/\\])test-d[/\\]/i,
   // A bare `test.js` / `tests.ts` is a common layout in small packages. Without
   // this, the file counts as authored source (inflating duplication findings)
   // while the tautology signal simultaneously reports "the project has no tests".

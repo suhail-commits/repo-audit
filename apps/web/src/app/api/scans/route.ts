@@ -1,5 +1,10 @@
 import { GitHubError, scanGitHubRepository } from "@vibe/engine";
-import { PERSONAS, type Persona } from "@vibe/shared";
+import {
+  DIMENSIONS,
+  PERSONAS,
+  type Dimension,
+  type Persona,
+} from "@vibe/shared";
 
 import { createScan } from "@/db";
 import { parseRepoSlug } from "@/lib/slug";
@@ -25,6 +30,7 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const persona = readPersona(form.get("persona"));
+  const focus = readFocus(form.get("focus"));
   const slug = parseRepoSlug(String(form.get("repo") ?? ""));
 
   if (!slug) {
@@ -42,7 +48,7 @@ export async function POST(request: Request): Promise<Response> {
         : {}),
     });
 
-    const id = await createScan({ slug, persona, result });
+    const id = await createScan({ slug, persona, focus, result });
     return json({ id }, 201);
   } catch (err) {
     if (err instanceof GitHubError) {
@@ -61,6 +67,19 @@ function readPersona(value: FormDataEntryValue | null): Persona {
   return typeof value === "string" && PERSONAS.includes(value as Persona)
     ? (value as Persona)
     : "founder";
+}
+
+/**
+ * Which question the visitor came to ask.
+ *
+ * Presentation only — one scan produces all three dimensions regardless, since
+ * the indexes are shared and skipping an analyzer would save almost nothing.
+ * This decides which section leads the report.
+ */
+function readFocus(value: FormDataEntryValue | null): Dimension {
+  return typeof value === "string" && DIMENSIONS.includes(value as Dimension)
+    ? (value as Dimension)
+    : "authorship";
 }
 
 function json(body: unknown, status: number): Response {

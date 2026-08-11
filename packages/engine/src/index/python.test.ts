@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { analyzeProvenance } from "../analyzers/provenance/index";
+import { analyzeAuthorship } from "../analyzers/authorship/index";
 import { buildContext } from "../scan";
 import { createFixtureRepo, type FixtureRepo } from "../testing/fixture-repo";
 import { profileLanguages, tierFor } from "./language";
@@ -117,7 +117,7 @@ describe("Python structural analysis", () => {
     const ctx = await buildContext(repo.rootPath);
     expect(ctx.python.parsedCount).toBeGreaterThan(20);
 
-    const { findings } = analyzeProvenance(ctx);
+    const { findings } = analyzeAuthorship(ctx);
     // Families are ranked by size, so the date helpers are not necessarily
     // first — look for the family that contains them.
     const dateFamily = findings
@@ -145,7 +145,7 @@ describe("Python structural analysis", () => {
     });
 
     const ctx = await buildContext(repo.rootPath);
-    const { clones } = analyzeProvenance(ctx);
+    const { clones } = analyzeAuthorship(ctx);
 
     // Four distinct shapes, each repeated six times. They group by shape rather
     // than collapsing into one family, which is what would happen if the hash
@@ -169,7 +169,7 @@ describe("Python structural analysis", () => {
     });
 
     const ctx = await buildContext(repo.rootPath);
-    const signal = analyzeProvenance(ctx).score.signals.find(
+    const signal = analyzeAuthorship(ctx).score.signals.find(
       (s) => s.id === "tautological-tests",
     )!;
 
@@ -190,7 +190,7 @@ describe("Python structural analysis", () => {
     });
 
     const ctx = await buildContext(repo.rootPath);
-    const signal = analyzeProvenance(ctx).score.signals.find(
+    const signal = analyzeAuthorship(ctx).score.signals.find(
       (s) => s.id === "tautological-tests",
     )!;
 
@@ -213,7 +213,7 @@ describe("Python structural analysis", () => {
     });
 
     const ctx = await buildContext(repo.rootPath);
-    const signal = analyzeProvenance(ctx).score.signals.find(
+    const signal = analyzeAuthorship(ctx).score.signals.find(
       (s) => s.id === "tautological-tests",
     )!;
 
@@ -233,7 +233,7 @@ describe("Python structural analysis", () => {
     });
 
     const ctx = await buildContext(repo.rootPath);
-    const signal = analyzeProvenance(ctx).score.signals.find(
+    const signal = analyzeAuthorship(ctx).score.signals.find(
       (s) => s.id === "obvious-comments",
     )!;
 
@@ -256,7 +256,7 @@ describe("Python structural analysis", () => {
     });
 
     const ctx = await buildContext(repo.rootPath);
-    const signal = analyzeProvenance(ctx).score.signals.find(
+    const signal = analyzeAuthorship(ctx).score.signals.find(
       (s) => s.id === "orphan-files",
     )!;
 

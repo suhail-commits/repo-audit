@@ -38,7 +38,7 @@ export const RULE_TEMPLATES: Record<string, RuleTemplate> = {
     engineer: {
       body: (d) =>
         `Agent attribution found in commit metadata: ${list(arr(d, "agents"))}. ` +
-        `Ground truth, not inference — provenance confidence is reported as certain.`,
+        `Ground truth, not inference — authorship confidence is reported as certain.`,
     },
     acquirer: {
       body: (d) =>
@@ -64,6 +64,28 @@ export const RULE_TEMPLATES: Record<string, RuleTemplate> = {
       body: (d) =>
         `Originated from ${list(arr(d, "platforms"))}. ` +
         `Expect little architectural intent and verify the security findings before valuing the codebase.`,
+    },
+  },
+
+  "ai-agent-tooling": {
+    title: (d) => `Set up for AI-assisted development with ${list(arr(d, "tools"))}`,
+    founder: {
+      body: (d) =>
+        `This repository contains configuration written for ${list(arr(d, "tools"))} — ` +
+        `instructions telling an AI coding assistant how to work on this codebase.`,
+      detail: () => [
+        "That means AI tooling was set up here deliberately. It does not tell us which lines it wrote, only that it was part of how this project was built.",
+      ],
+    },
+    engineer: {
+      body: (d) =>
+        `Agent configuration committed: ${list(arr(d, "evidence"))}. ` +
+        `Evidence the tooling was configured, not a claim about any specific line.`,
+    },
+    acquirer: {
+      body: (d) =>
+        `Developed with ${list(arr(d, "tools"))}. ` +
+        `Weigh the authorship score and any security findings accordingly; the tooling itself is not a defect.`,
     },
   },
 
@@ -95,7 +117,7 @@ export const RULE_TEMPLATES: Record<string, RuleTemplate> = {
   },
 
   "unused-dependencies": {
-    title: (d) => `${num(d, "count")} unused dependencies`,
+    title: (d) => `${countOf(num(d, "count"), "unused dependency", "unused dependencies")}`,
     founder: {
       body: (d) =>
         `Your project installs ${countOf(num(d, "count"), "package")} it never actually uses ` +

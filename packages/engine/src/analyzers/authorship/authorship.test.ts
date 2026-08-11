@@ -6,7 +6,7 @@ import {
   type FixtureCommit,
   type FixtureRepo,
 } from "../../testing/fixture-repo";
-import { analyzeProvenance } from "./index";
+import { analyzeAuthorship } from "./index";
 
 let repo: FixtureRepo | undefined;
 afterEach(() => {
@@ -14,13 +14,13 @@ afterEach(() => {
   repo = undefined;
 });
 
-async function provenanceOf(
+async function authorshipOf(
   opts: Parameters<typeof createFixtureRepo>[0],
   structuralOnly = false,
 ) {
   repo = createFixtureRepo(opts);
   const ctx = await buildContext(repo.rootPath);
-  return { result: analyzeProvenance(ctx, { structuralOnly }), ctx };
+  return { result: analyzeAuthorship(ctx, { structuralOnly }), ctx };
 }
 
 // ---------------------------------------------------------------------------
@@ -306,14 +306,14 @@ function handWrittenCommits(): FixtureCommit[] {
 // Calibration
 // ---------------------------------------------------------------------------
 
-describe("provenance calibration", () => {
+describe("authorship calibration", () => {
   it("separates an agent-built repo from a hand-written one using structure alone", async () => {
-    const vibe = await provenanceOf({ commits: vibeCommits() }, true);
+    const vibe = await authorshipOf({ commits: vibeCommits() }, true);
     const vibeScore = vibe.result.score.score;
     repo!.cleanup();
     repo = undefined;
 
-    const hand = await provenanceOf({ commits: handWrittenCommits() }, true);
+    const hand = await authorshipOf({ commits: handWrittenCommits() }, true);
     const handScore = hand.result.score.score;
 
     // Ground-truth signals are disabled, so this is the structural signals alone.
@@ -325,7 +325,7 @@ describe("provenance calibration", () => {
 
 describe("confidence handling", () => {
   it("reports certain confidence when commit trailers name an agent", async () => {
-    const { result } = await provenanceOf({
+    const { result } = await authorshipOf({
       commits: [
         {
           message: "feat: scaffold\n\nCo-Authored-By: Claude <noreply@anthropic.com>",
@@ -335,20 +335,27 @@ describe("confidence handling", () => {
     });
 
     expect(result.agents).toContain("Claude Code");
-    expect(result.score.confidence).toBe("certain");
-    expect(result.findings.some((f) => f.ruleId === "ai-authored-commits")).toBe(true);
+
+    // The *finding* is certain — the trailer is either there or it is not.
+    // The dimension's confidence is coverage and never claims certainty.
+    const attributed = result.findings.find(
+      (f) => f.ruleId === "ai-authored-commits",
+    );
+    expect(attributed).toBeDefined();
+    expect(attributed!.confidence).toBe("certain");
+    expect(result.score.confidence).not.toBe("certain");
   });
 
   it("lowers confidence rather than the score when git history is absent", async () => {
     const files = vibeFiles();
 
-    const withGit = await provenanceOf({ commits: vibeCommits() }, true);
+    const withGit = await authorshipOf({ commits: vibeCommits() }, true);
     const gitScore = withGit.result.score.score;
     const gitConfidence = withGit.result.score.confidence;
     repo!.cleanup();
     repo = undefined;
 
-    const withoutGit = await provenanceOf({ files, withoutGit: true }, true);
+    const withoutGit = await authorshipOf({ files, withoutGit: true }, true);
     const zipScore = withoutGit.result.score.score;
 
     // The same code must not look cleaner just because history is missing.
@@ -369,7 +376,7 @@ describe("confidence handling", () => {
 
 describe("individual signals", () => {
   it("detects structurally identical functions across files", async () => {
-    const { result } = await provenanceOf({ files: vibeFiles(), withoutGit: true });
+    const { result } = await authorshipOf({ files: vibeFiles(), withoutGit: true });
 
     const clone = result.findings.find((f) => f.ruleId === "duplicate-function");
     expect(clone).toBeDefined();
@@ -381,7 +388,7 @@ describe("individual signals", () => {
   });
 
   it("flags declared dependencies that are never imported", async () => {
-    const { result } = await provenanceOf({ files: vibeFiles(), withoutGit: true });
+    const { result } = await authorshipOf({ files: vibeFiles(), withoutGit: true });
 
     const unused = result.findings.find((f) => f.ruleId === "unused-dependencies");
     expect(unused).toBeDefined();
@@ -391,7 +398,7 @@ describe("individual signals", () => {
   });
 
   it("identifies AI builder platforms from their artifacts", async () => {
-    const { result } = await provenanceOf({
+    const { result } = await authorshipOf({
       files: {
         ...vibeFiles(),
         "package.json": JSON.stringify({
@@ -405,11 +412,12 @@ describe("individual signals", () => {
     const platform = result.findings.find((f) => f.ruleId === "ai-builder-platform");
     expect(platform).toBeDefined();
     expect(platform!.data["platforms"]).toContain("Lovable");
-    expect(result.score.confidence).toBe("certain");
+    expect(platform!.confidence).toBe("certain");
+    expect(result.score.confidence).not.toBe("certain");
   });
 
   it("does not flag a clean repo as platform-generated", async () => {
-    const { result } = await provenanceOf({
+    const { result } = await authorshipOf({
       files: handWrittenFiles(),
       withoutGit: true,
     });
