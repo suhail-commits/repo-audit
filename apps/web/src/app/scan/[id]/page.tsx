@@ -32,18 +32,16 @@ export default async function ScanPage({
   if (!scan.result) {
     return (
       <main>
-        <h2>That scan didn&rsquo;t finish.</h2>
-        <div className="card">
-          <p style={{ margin: 0 }}>
-            {scan.error ?? "The scan failed for an unknown reason."}
-          </p>
-          <p className="meta" style={{ marginTop: "1rem" }}>
-            {scan.slug}
+        <section className="hero">
+          <h1>That scan didn&rsquo;t finish.</h1>
+        </section>
+        <div className="card stack-sm">
+          <p>{scan.error ?? "The scan failed for an unknown reason."}</p>
+          <p className="meta">{scan.slug}</p>
+          <p>
+            <a href="/">Try another repository</a>
           </p>
         </div>
-        <p style={{ marginTop: "1.5rem" }}>
-          <a href="/">Try another repository</a>
-        </p>
       </main>
     );
   }

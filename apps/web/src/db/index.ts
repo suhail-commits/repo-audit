@@ -74,7 +74,22 @@ async function ensureSchema(db: SqlClient): Promise<void> {
 // In-memory fallback
 // ---------------------------------------------------------------------------
 
-const memory = new Map<string, ScanRecord>();
+/**
+ * Held on `globalThis`, not in a module-scoped `const`.
+ *
+ * Next compiles route handlers and server components into separate module
+ * instances, so a module-level Map gives the POST handler and the report page
+ * two different stores — a scan is written to one and looked up in the other,
+ * and every report 404s. HMR compounds it by replacing the module on each edit.
+ *
+ * Only affects the no-database path; with `DATABASE_URL` set nothing here runs.
+ */
+const memoryStore = globalThis as typeof globalThis & {
+  __repoAuditScans?: Map<string, ScanRecord>;
+};
+memoryStore.__repoAuditScans ??= new Map<string, ScanRecord>();
+const memory = memoryStore.__repoAuditScans;
+
 let warnedAboutMemory = false;
 
 function warnMemory(): void {

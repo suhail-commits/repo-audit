@@ -1,6 +1,8 @@
 import { TemplateNarrator } from "@vibe/rules";
 import { PERSONAS, type Persona, type ScanResult } from "@vibe/shared";
 
+import { SignalBreakdown } from "@/components/SignalBreakdown";
+
 const narrator = new TemplateNarrator();
 
 const PERSONA_LABELS: Record<Persona, string> = {
@@ -19,10 +21,13 @@ export function Report({
   persona: Persona;
 }) {
   const report = narrator.report(result, persona);
+  // The narrator carries prose; the breakdown needs the raw signals, which only
+  // live on the scan result.
+  const provenance = result.scores.find((s) => s.dimension === "provenance");
 
   return (
     <main>
-      <div className="section-head" style={{ margin: "0 0 1rem" }}>
+      <div className="report-head">
         <span className="meta">{result.repo.name}</span>
         <nav className="personas" aria-label="Report detail level">
           {PERSONAS.map((option) => (
@@ -43,34 +48,38 @@ export function Report({
       </section>
 
       {report.scores.map((score) => (
-        <section className="card" key={score.dimension} style={{ marginBottom: "1rem" }}>
-          <div className="score-row">
-            <span className="score-value">{score.score}</span>
-            <span className="score-label">/ 100 {score.dimension}</span>
-          </div>
-          <div className="meter">
-            <div style={{ width: `${Math.min(100, Math.max(0, score.score))}%` }} />
+        <section className="score-panel" key={score.dimension}>
+          <div>
+            <div className="score-hero">
+              <span className="score-value">{score.score}</span>
+              <span className="score-of">/ 100</span>
+            </div>
+            <span className="score-caption">{score.dimension}</span>
           </div>
 
-          {score.evidence.length > 0 ? (
-            <ul className="evidence">
-              {score.evidence.map((line, i) => (
-                <li key={i}>{line}</li>
-              ))}
-            </ul>
-          ) : (
-            <p className="lede" style={{ margin: 0 }}>
-              Nothing notable was found for this measure.
-            </p>
-          )}
+          <div>
+            {score.evidence.length > 0 ? (
+              <ul className="evidence">
+                {score.evidence.map((line, i) => (
+                  <li key={i}>{line}</li>
+                ))}
+              </ul>
+            ) : (
+              <p className="hint hint-flush">
+                Nothing notable was found for this measure.
+              </p>
+            )}
 
-          {score.caveats.map((caveat, i) => (
-            <p className="caveat" key={i}>
-              {caveat}
-            </p>
-          ))}
+            {score.caveats.map((caveat, i) => (
+              <p className="caveat" key={i}>
+                {caveat}
+              </p>
+            ))}
+          </div>
         </section>
       ))}
+
+      {provenance ? <SignalBreakdown score={provenance} /> : null}
 
       {report.findings.length > 0 ? (
         <>
@@ -81,10 +90,12 @@ export function Report({
 
           {report.findings.map((finding, i) => (
             <article className="finding" key={`${finding.ruleId}-${i}`}>
-              <header>
-                <span className={`sev sev-${finding.severity}`}>{finding.severity}</span>
+              <div className="finding-head">
+                <span className={`sev sev-${finding.severity}`}>
+                  {finding.severity}
+                </span>
                 <h4>{finding.title}</h4>
-              </header>
+              </div>
               <p>{finding.body}</p>
               {finding.detail.map((line, j) => (
                 <p className="detail" key={j}>
@@ -120,9 +131,9 @@ export function Report({
         </div>
       ) : null}
 
-      <p className="meta" style={{ marginTop: "2.5rem" }}>
-        Analysed {result.repo.sourceFileCount} source files in {result.durationMs}ms.
-        No code was executed.
+      <p className="meta report-foot">
+        Analysed {result.repo.sourceFileCount} source files in {result.durationMs}
+        ms. No code was executed.
       </p>
     </main>
   );

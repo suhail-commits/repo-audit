@@ -13,12 +13,19 @@ export default async function HomePage() {
 
   return (
     <main>
-      <h2>Find out what&rsquo;s really in your codebase.</h2>
-      <p className="lede">
-        Point this at a repository and it will tell you how much of it was written
-        by AI, and where that left gaps. Every finding comes from reading your
-        code &mdash; no model is asked for an opinion, and nothing is guessed.
-      </p>
+      <section className="hero">
+        <h1>How much of your codebase did AI actually write?</h1>
+        <p>
+          Paste a public GitHub repository. You get a score, the evidence behind
+          it, and what that left behind &mdash; read from the code and the commit
+          history, not guessed at.
+        </p>
+        <ul className="hero-note">
+          <li>No sign-up</li>
+          <li>No model is asked for an opinion</li>
+          <li>Same repo, same answer, every time</li>
+        </ul>
+      </section>
 
       <StartScanForm />
 
@@ -26,16 +33,23 @@ export default async function HomePage() {
         <>
           <div className="section-head">
             <h3>Or read one we prepared</h3>
+            <span className="meta">{examples.length} scans</span>
           </div>
           <div className="examples">
             {examples.map((example) => {
               const score = example.result?.scores[0]?.score ?? 0;
               return (
-                <a className="example" key={example.id} href={`/scan/${example.id}`}>
+                <a
+                  className="example"
+                  key={example.id}
+                  href={`/scan/${example.id}`}
+                >
                   <span className="example-score">{score}</span>
                   <span>
                     <strong>{example.slug}</strong>
-                    <em>{provenanceBand(score).replace("-", " ")} to be AI-generated</em>
+                    <em>
+                      {provenanceBand(score).replace("-", " ")} to be AI-generated
+                    </em>
                   </span>
                 </a>
               );

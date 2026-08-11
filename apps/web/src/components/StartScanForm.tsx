@@ -106,13 +106,8 @@ export function StartScanForm() {
         />
       </div>
 
-      <fieldset
-        className="field"
-        style={{ border: 0, padding: 0, margin: "0 0 1.5rem" }}
-      >
-        <legend style={{ fontWeight: 600, fontSize: "0.9rem", padding: 0 }}>
-          Who&rsquo;s reading this report?
-        </legend>
+      <fieldset className="field fieldset-reset">
+        <legend>Who&rsquo;s reading this report?</legend>
         <p className="hint">This only changes how results are explained.</p>
         <div className="choices">
           {PERSONA_CHOICES.map((choice) => (
@@ -137,7 +132,7 @@ export function StartScanForm() {
       </button>
 
       {busy ? (
-        <p className="hint" style={{ marginTop: "0.9rem" }} aria-live="polite">
+        <p className="status-line" aria-live="polite">
           {STAGES[stage]}
         </p>
       ) : null}
