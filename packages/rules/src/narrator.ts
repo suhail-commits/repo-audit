@@ -94,6 +94,20 @@ export class TemplateNarrator implements Narrator {
       );
     }
 
+    /*
+     * Never say "hand-written" when the repository itself carries evidence of
+     * AI tooling. A low score means the *code* shows few of the usual patterns,
+     * which is a different claim from "no AI was involved" — and stating the
+     * second when we have direct evidence of the first reads as a broken tool.
+     *
+     * This is the shape the confidence bug took in the narrator: the report used
+     * to headline "this mostly looks like hand-written code" directly above
+     * "Claude Code: CLAUDE.md present".
+     */
+    if (band === "unlikely" && hasDirectEvidence(score)) {
+      return "AI tools were used on this project, but the code itself shows few of the usual signs.";
+    }
+
     switch (band) {
       case "near-certain":
         return "This app was almost certainly built with AI coding tools.";
@@ -177,4 +191,20 @@ export class TemplateNarrator implements Narrator {
         : "We could not see your project's history, so some checks were skipped.")
     );
   }
+}
+
+/**
+ * Signals whose firing is an artifact of AI tooling rather than an inference
+ * about the code: a commit trailer, a builder marker, a committed agent config.
+ */
+const DIRECT_EVIDENCE_SIGNALS = new Set([
+  "agent-trailers",
+  "builder-platform",
+  "agent-tooling",
+]);
+
+function hasDirectEvidence(score: DimensionScore): boolean {
+  return score.signals.some(
+    (s) => s.available && s.value > 0 && DIRECT_EVIDENCE_SIGNALS.has(s.id),
+  );
 }

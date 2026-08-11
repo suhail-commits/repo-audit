@@ -335,8 +335,15 @@ describe("confidence handling", () => {
     });
 
     expect(result.agents).toContain("Claude Code");
-    expect(result.score.confidence).toBe("certain");
-    expect(result.findings.some((f) => f.ruleId === "ai-authored-commits")).toBe(true);
+
+    // The *finding* is certain — the trailer is either there or it is not.
+    // The dimension's confidence is coverage and never claims certainty.
+    const attributed = result.findings.find(
+      (f) => f.ruleId === "ai-authored-commits",
+    );
+    expect(attributed).toBeDefined();
+    expect(attributed!.confidence).toBe("certain");
+    expect(result.score.confidence).not.toBe("certain");
   });
 
   it("lowers confidence rather than the score when git history is absent", async () => {
@@ -405,7 +412,8 @@ describe("individual signals", () => {
     const platform = result.findings.find((f) => f.ruleId === "ai-builder-platform");
     expect(platform).toBeDefined();
     expect(platform!.data["platforms"]).toContain("Lovable");
-    expect(result.score.confidence).toBe("certain");
+    expect(platform!.confidence).toBe("certain");
+    expect(result.score.confidence).not.toBe("certain");
   });
 
   it("does not flag a clean repo as platform-generated", async () => {

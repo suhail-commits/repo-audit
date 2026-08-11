@@ -67,6 +67,28 @@ export const RULE_TEMPLATES: Record<string, RuleTemplate> = {
     },
   },
 
+  "ai-agent-tooling": {
+    title: (d) => `Set up for AI-assisted development with ${list(arr(d, "tools"))}`,
+    founder: {
+      body: (d) =>
+        `This repository contains configuration written for ${list(arr(d, "tools"))} — ` +
+        `instructions telling an AI coding assistant how to work on this codebase.`,
+      detail: () => [
+        "That means AI tooling was set up here deliberately. It does not tell us which lines it wrote, only that it was part of how this project was built.",
+      ],
+    },
+    engineer: {
+      body: (d) =>
+        `Agent configuration committed: ${list(arr(d, "evidence"))}. ` +
+        `Evidence the tooling was configured, not a claim about any specific line.`,
+    },
+    acquirer: {
+      body: (d) =>
+        `Developed with ${list(arr(d, "tools"))}. ` +
+        `Weigh the provenance score and any security findings accordingly; the tooling itself is not a defect.`,
+    },
+  },
+
   "duplicate-function": {
     title: (d) =>
       `${num(d, "copies")} near-identical copies of the same function`,

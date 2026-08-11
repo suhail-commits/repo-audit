@@ -40,7 +40,26 @@ const AGENT_MARKERS: AgentMarker[] = [
   { name: "Lovable", message: /Co-Authored-By:\s*(Lovable|gpt-engineer)/i },
   { name: "Replit Agent", message: /Replit-Commit-Author:\s*Agent/i },
   { name: "Devlo", message: /Co-Authored-By:\s*devlo/i },
+  { name: "Jules", message: /Co-Authored-By:\s*(Google )?Jules/i },
+  { name: "Cody", message: /Co-Authored-By:\s*(Sourcegraph )?Cody/i },
+  { name: "Continue", message: /Co-Authored-By:\s*Continue/i },
+  { name: "OpenHands", message: /Co-Authored-By:\s*OpenHands/i, email: /openhands@all-hands\.dev/i },
+  { name: "Amp", message: /Co-Authored-By:\s*Amp(\s|<)/i },
+  { name: "Junie", message: /Co-Authored-By:\s*Junie/i },
+  { name: "Factory", message: /Co-Authored-By:\s*(Factory|Droid)/i },
+  { name: "Codegen", message: /Co-Authored-By:\s*Codegen/i },
+  { name: "Sweep", message: /Co-Authored-By:\s*Sweep/i },
+  { name: "Trae", message: /Co-Authored-By:\s*Trae/i },
+  { name: "Zed Agent", message: /Co-Authored-By:\s*Zed(\s|<)/i },
 ];
+
+/*
+ * Deliberately no generic `[bot]` or "Co-Authored-By: .*bot" rule.
+ *
+ * Dependabot, Renovate and release bots all follow that convention and are
+ * automation, not AI authorship. A catch-all would light up on essentially
+ * every maintained repository that takes dependency bumps. Named tools only.
+ */
 
 export const WEIGHT = 3;
 

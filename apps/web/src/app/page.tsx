@@ -16,13 +16,14 @@ export default async function HomePage() {
       <section className="hero">
         <h1>How much of your codebase did AI actually write?</h1>
         <p>
-          Paste a public GitHub repository. You get a score, the evidence behind
-          it, and what that left behind &mdash; read from the code and the commit
-          history, not guessed at.
+          Paste a public GitHub repository. You get a score for how much of it
+          looks AI-generated, and every piece of evidence behind that number
+          &mdash; read from the code and the commit history, not guessed at.
         </p>
         <ul className="hero-note">
           <li>No sign-up, no GitHub access</li>
           <li>No model is asked for an opinion</li>
+          <li>Every number traces to something measured</li>
           <li>Same repo, same answer, every time</li>
         </ul>
       </section>

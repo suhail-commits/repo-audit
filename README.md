@@ -157,6 +157,32 @@ build, no test run, no git hooks. Archives are extracted with path-traversal rej
 rejection, and expansion caps; oversized repositories are refused up front rather than being allowed
 to exhaust a function timeout.
 
+## What this cannot see
+
+Worth stating plainly, because a scanner that hides its blind spots is worse than one that names
+them.
+
+**It only reads what is committed.** Plenty of people gitignore `CLAUDE.md` or `.cursorrules`. Those
+repositories look untooled to us, because from the outside they are.
+
+**It is not adversarial-proof.** Delete the agent config, strip the commit trailers, and the two
+strongest signals go quiet. The structural ones — duplicated logic, comments restating the line
+below, convention drift between files — are harder to erase, but nothing here survives someone who
+sets out to defeat it. This measures ordinary repositories honestly; it is not a forensic tool.
+
+**A short or squashed history removes four signals.** Commit size, message entropy, build velocity
+and write-once files all need a real history. Squash-merge everything, or start version control
+last week, and they report unavailable.
+
+**The worked example is this repository.** Before agent-config detection existed, scanning it
+returned **0/100, "unlikely to be AI-generated"** — while three agent config files sat tracked in
+the tree and every commit deliberately carried no AI attribution. The score was a faithful
+measurement of the evidence available and a poor description of reality. Both things are true at
+once, and that gap is the honest limit of this approach.
+
+**A low score is not a clean bill of health.** It means the usual patterns were not found. On a
+carefully written codebase — whoever or whatever wrote it — that is exactly what you would expect.
+
 ## Status
 
 Provenance analysis is complete and calibrated. Security analysis — route-level auth coverage,

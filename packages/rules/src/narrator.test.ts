@@ -229,6 +229,64 @@ describe("score narration", () => {
     );
   });
 
+  it("never says hand-written when the repo carries AI tooling evidence", () => {
+    /*
+     * The report used to headline "this mostly looks like hand-written code"
+     * directly above "Claude Code: CLAUDE.md present". A low score means the
+     * *code* shows few of the usual patterns — not that no AI was involved.
+     */
+    const result = scanResultWith([
+      {
+        dimension: "provenance",
+        score: 15,
+        confidence: "high",
+        signals: [
+          {
+            id: "agent-tooling",
+            value: 1,
+            weight: 3,
+            available: true,
+            evidence: ["Claude Code: `CLAUDE.md` present"],
+          },
+          {
+            id: "duplicate-logic",
+            value: 0,
+            weight: 2.5,
+            available: true,
+            evidence: [],
+          },
+        ],
+        unavailable: [],
+      },
+    ]);
+
+    const headline = narrator.report(result, "founder").headline;
+    expect(headline).not.toMatch(/hand-written/i);
+    expect(headline).toMatch(/AI tools were used/i);
+  });
+
+  it("still says hand-written when nothing points at AI tooling", () => {
+    const result = scanResultWith([
+      {
+        dimension: "provenance",
+        score: 4,
+        confidence: "high",
+        signals: [
+          {
+            id: "agent-tooling",
+            value: 0,
+            weight: 3,
+            available: true,
+            evidence: [],
+          },
+        ],
+        unavailable: [],
+      },
+    ]);
+
+    expect(narrator.report(result, "founder").headline).toMatch(/hand-written/i);
+  });
+
   it("only cites evidence from signals that actually fired", () => {
     const result = scanResultWith([
       {

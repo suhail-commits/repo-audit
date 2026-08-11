@@ -22,7 +22,11 @@ import {
   unusedDependencySignal,
 } from "./dead";
 import { conventionDriftSignal } from "./drift";
-import { platformFindings, platformSignal } from "./platform";
+import {
+  agentToolingSignal,
+  platformFindings,
+  platformSignal,
+} from "./platform";
 import { agentTrailerSignal, attributedAgents } from "./trailers";
 
 export interface ProvenanceResult {
@@ -37,7 +41,7 @@ export interface ProvenanceResult {
  * Signals that constitute direct evidence rather than inference. When one fires,
  * the score is reported at `certain` confidence.
  */
-const GROUND_TRUTH = ["agent-trailers", "builder-platform"];
+const GROUND_TRUTH = ["agent-trailers", "builder-platform", "agent-tooling"];
 
 /**
  * Signals excluded when calibrating against the labeled corpus.
@@ -63,6 +67,7 @@ export function analyzeProvenance(
     // Direct evidence.
     agentTrailerSignal(ctx),
     platformSignal(ctx),
+    agentToolingSignal(ctx),
     // History shape.
     commitSizeSignal(ctx),
     commitMessageSignal(ctx),
