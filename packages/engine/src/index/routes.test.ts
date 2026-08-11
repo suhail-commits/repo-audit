@@ -26,6 +26,9 @@ describe("nextAppPath", () => {
     expect(nextAppPath("app/api/files/[...path]/route.ts")).toBe("/api/files/*");
     expect(nextAppPath("app/api/opt/[[...slug]]/route.ts")).toBe("/api/opt/*");
     expect(nextAppPath("app/route.ts")).toBe("/");
+    // The app directory need not be at the scan root — see the monorepo block.
+    expect(nextAppPath("apps/web/src/app/api/scans/route.ts")).toBe("/api/scans");
+    expect(nextAppPath("packages/api/app/health/route.ts")).toBe("/health");
   });
 });
 
@@ -34,6 +37,7 @@ describe("nextPagesPath", () => {
     expect(nextPagesPath("pages/api/users.ts")).toBe("/api/users");
     expect(nextPagesPath("src/pages/api/users/[id].ts")).toBe("/api/users/:id");
     expect(nextPagesPath("pages/api/index.ts")).toBe("/api");
+    expect(nextPagesPath("apps/legacy/src/pages/api/users.ts")).toBe("/api/users");
   });
 });
 
@@ -89,6 +93,54 @@ export default function handler(req, res) { res.json({}) }
       "ALL /api/users/:id",
     ]);
     expect(table.routes[0]!.framework).toBe("next-pages");
+  });
+});
+
+/*
+ * Seen on `suhail-commits/repo-audit` — this repository's own scan reported
+ * zero HTTP routes while `apps/web/src/app/api/scans/route.ts` sat in the
+ * index. Both Next patterns were anchored to the scan root, so no monorepo
+ * ever matched: the app lives one or more directories down.
+ */
+describe("RouteTable — Next.js inside a monorepo", () => {
+  it("finds App Router routes below the scan root", async () => {
+    const table = await tableFor({
+      "apps/web/src/app/api/scans/route.ts": `
+export async function POST(request: Request) { return Response.json({}) }
+`,
+      "packages/api/app/health/route.ts": `
+export function GET() { return new Response('ok') }
+`,
+    });
+
+    expect(table.routes.map((r) => `${r.method} ${r.path}`).sort()).toEqual([
+      "GET /health",
+      "POST /api/scans",
+    ]);
+  });
+
+  it("finds Pages API routes below the scan root", async () => {
+    const table = await tableFor({
+      "apps/legacy/src/pages/api/users/[id].ts": `
+export default function handler(req, res) { res.json({}) }
+`,
+    });
+
+    expect(table.routes.map((r) => `${r.method} ${r.path}`)).toEqual([
+      "ALL /api/users/:id",
+    ]);
+  });
+
+  it("does not treat a directory merely ending in 'app' as an app root", async () => {
+    const table = await tableFor({
+      // `my-app/` is a plain folder. Matching it would invent routes in any
+      // repository that happens to name a directory this way.
+      "src/my-app/route.ts": `
+export function GET() { return new Response('ok') }
+`,
+    });
+
+    expect(table.routes).toEqual([]);
   });
 });
 

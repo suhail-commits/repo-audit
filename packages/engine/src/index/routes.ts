@@ -111,7 +111,23 @@ export class RouteTable {
 // Next.js App Router
 // ---------------------------------------------------------------------------
 
-const NEXT_APP_ROUTE_RE = /^(?:src\/)?app\/(.*\/)?route\.[cm]?[jt]sx?$/;
+/**
+ * An App Router route handler, wherever the `app/` directory happens to live.
+ *
+ * **The `app/` root is not necessarily at the scan root.** In a monorepo the
+ * Next application sits at `apps/web/src/app/`, and anchoring this pattern to
+ * the repository root found zero routes in every such repo — including this
+ * one, whose own `apps/web/src/app/api/scans/route.ts` went undetected. Same
+ * anchoring mistake that once made monorepo entry points read as dead code.
+ *
+ * `(?:^|\/)` keeps the segment exact: `my-app/route.ts` does not match, because
+ * the character before `app` must be a separator or the start of the path.
+ * `node_modules` never reaches here — `guards.ts` excludes it from the index.
+ *
+ * Group 1 is the path *inside* the app directory, which is what maps to a URL.
+ */
+const NEXT_APP_ROUTE_RE =
+  /(?:^|\/)(?:src\/)?app\/((?:.*\/)?route\.[cm]?[jt]sx?)$/;
 
 function isNextAppRoute(relPath: string): boolean {
   return NEXT_APP_ROUTE_RE.test(relPath);
@@ -145,10 +161,11 @@ function nextAppRoutes(parsed: ParsedFile): Route[] {
  * `[id]` becomes `:id` and `[...rest]` becomes a wildcard.
  */
 export function nextAppPath(relPath: string): string {
-  const inner = relPath
-    .replace(/^src\//, "")
-    .replace(/^app\//, "")
-    .replace(/\/?route\.[cm]?[jt]sx?$/, "");
+  // Everything before the `app/` directory is repository layout, not URL.
+  const inner = (NEXT_APP_ROUTE_RE.exec(relPath)?.[1] ?? relPath).replace(
+    /\/?route\.[cm]?[jt]sx?$/,
+    "",
+  );
 
   const segments: string[] = [];
   for (const seg of inner.split("/")) {
@@ -176,7 +193,9 @@ export function nextAppPath(relPath: string): string {
 // Next.js Pages API
 // ---------------------------------------------------------------------------
 
-const NEXT_PAGES_API_RE = /^(?:src\/)?pages\/api\/.+\.[cm]?[jt]sx?$/;
+/** Same monorepo reasoning as `NEXT_APP_ROUTE_RE`. Group 1 starts at `api/`. */
+const NEXT_PAGES_API_RE =
+  /(?:^|\/)(?:src\/)?pages\/(api\/.+\.[cm]?[jt]sx?)$/;
 
 function isNextPagesApi(relPath: string): boolean {
   return NEXT_PAGES_API_RE.test(relPath);
@@ -206,9 +225,7 @@ function nextPagesRoutes(parsed: ParsedFile): Route[] {
 }
 
 export function nextPagesPath(relPath: string): string {
-  const inner = relPath
-    .replace(/^src\//, "")
-    .replace(/^pages\//, "")
+  const inner = (NEXT_PAGES_API_RE.exec(relPath)?.[1] ?? relPath)
     .replace(/\.[cm]?[jt]sx?$/, "")
     .replace(/\/index$/, "");
 
