@@ -14,6 +14,8 @@ export {
   type AuthorshipResult,
 } from "./analyzers/authorship/index";
 
+export { analyzeHealth, type HealthResult } from "./analyzers/health/index";
+
 export { scoreDimension, authorshipBand } from "./score/index";
 
 export {

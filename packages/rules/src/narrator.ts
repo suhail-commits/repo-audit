@@ -1,6 +1,7 @@
 import {
   confidencePhrase,
   authorshipBand,
+  healthBand,
   severityRank,
   type DimensionScore,
   type Finding,
@@ -149,6 +150,9 @@ export class TemplateNarrator implements Narrator {
   }
 
   private scoreHeadline(score: DimensionScore, persona: Persona): string {
+    if (score.dimension === "health") {
+      return this.healthHeadline(score, persona);
+    }
     if (score.dimension !== "authorship") {
       return `${score.dimension}: ${score.score}/100`;
     }
@@ -193,6 +197,68 @@ export class TemplateNarrator implements Narrator {
         return "Parts of this app look like they were written by AI coding tools.";
       case "unlikely":
         return "This mostly looks like hand-written code.";
+    }
+  }
+
+  /**
+   * The code-health verdict.
+   *
+   * The number runs the same direction as authorship — higher is more problems
+   * — so the sentence has to carry that, or "62 / 100" reads as a pass mark.
+   * Every phrasing here names what was found rather than grading the codebase:
+   * we measured duplication and missing tests, which is not the same as knowing
+   * whether the code is any good.
+   */
+  private healthHeadline(score: DimensionScore, persona: Persona): string {
+    const band = healthBand(score.score);
+    const measured = score.signals.filter((s) => s.available).length;
+
+    /*
+     * One signal at full value inside an otherwise clean set averages down to a
+     * low score, and "the code is in good shape" then sits directly above "319
+     * of 917 test cases assert nothing at all". Seen on `sindresorhus/execa`.
+     *
+     * This is the same failure the authorship headline has a guard for: a band
+     * describes the aggregate, and the aggregate is not entitled to overrule a
+     * specific thing we measured and are about to print.
+     */
+    const standouts = score.signals.filter((s) => s.available && s.value >= 0.5);
+    const clean = band === "solid" && standouts.length === 0;
+
+    if (persona === "engineer") {
+      // Already unambiguous: it states the number, the direction and coverage.
+      return (
+        `Code health ${score.score}/100 — ${band.replace("-", " ")} ` +
+        `(higher is worse; ${measured}/${score.signals.length} signals available)`
+      );
+    }
+
+    if (persona === "acquirer") {
+      switch (band) {
+        case "poor":
+          return `Substantial maintenance debt: ${score.score}/100 on problems found.`;
+        case "rough":
+          return `Meaningful maintenance debt: ${score.score}/100 on problems found.`;
+        case "minor-issues":
+          return `Ordinary maintenance debt for a codebase this size (${score.score}/100).`;
+        case "solid":
+          return clean
+            ? `Little maintenance debt found (${score.score}/100).`
+            : `Low maintenance debt overall (${score.score}/100), concentrated in ${countOf(standouts.length, "area")}.`;
+      }
+    }
+
+    switch (band) {
+      case "poor":
+        return "There is a lot here that will slow down future changes.";
+      case "rough":
+        return "A fair amount here will make future changes harder than they need to be.";
+      case "minor-issues":
+        return "A few rough edges, nothing unusual for a codebase this size.";
+      case "solid":
+        return clean
+          ? "The code is in good shape on the things we can measure."
+          : "Mostly in good shape, but a few specific things stand out below.";
     }
   }
 

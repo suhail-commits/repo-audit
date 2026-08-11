@@ -139,6 +139,14 @@ const LABELS: Record<string, LabelEntry> = {
     },
     technical: { label: "tautological-tests" },
   },
+  "test-coverage": {
+    plain: {
+      label: "How much has tests",
+      explains:
+        "Test files measured against source files. Counted by file, not by line — we never run the suite.",
+    },
+    technical: { label: "test-coverage" },
+  },
 };
 
 /**

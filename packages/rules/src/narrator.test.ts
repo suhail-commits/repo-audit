@@ -1,4 +1,4 @@
-import { buildContext, analyzeAuthorship } from "@vibe/engine";
+import { buildContext, analyzeAuthorship, analyzeHealth } from "@vibe/engine";
 import { createFixtureRepo } from "@vibe/engine/testing";
 import type { Finding, ScanResult } from "@vibe/shared";
 import { afterEach, describe, expect, it } from "vitest";
@@ -96,7 +96,16 @@ describe("template coverage", () => {
     cleanup = repo.cleanup;
 
     const ctx = await buildContext(repo.rootPath);
-    const emitted = analyzeAuthorship(ctx).score.signals.map((s) => s.id);
+    const authorship = analyzeAuthorship(ctx);
+    /*
+     * Every dimension that carries a score, not just authorship. Checking one
+     * of them would have passed while `test-coverage` — a health-only signal —
+     * rendered as "Test coverage" from the id-humanising fallback.
+     */
+    const emitted = [
+      ...authorship.score.signals,
+      ...analyzeHealth(ctx, authorship.score.signals).score.signals,
+    ].map((s) => s.id);
     expect(emitted.length).toBeGreaterThan(0);
 
     const labelled = new Set(labelledSignalIds());

@@ -34,6 +34,45 @@ export function authorshipBand(score: number): AuthorshipBand {
   return "unlikely";
 }
 
+/**
+ * Plain-English band for a code-health score.
+ *
+ * **Higher means more problems, the same direction as authorship**, because
+ * every signal value is a measure of how much of the bad thing was found. The
+ * alternative — inverting so 85 reads as "healthy" — would make the breakdown
+ * bars sum to `100 − score`, and the bars summing to the number is the whole
+ * argument that this tool measures rather than guesses.
+ *
+ * The band words carry the direction instead, which is why they are adjectives
+ * about the codebase rather than about likelihood.
+ */
+export type HealthBand = "solid" | "minor-issues" | "rough" | "poor";
+
+export const HEALTH_BANDS: readonly {
+  band: HealthBand;
+  from: number;
+  label: string;
+}[] = [
+  { band: "solid", from: 0, label: "solid" },
+  { band: "minor-issues", from: 25, label: "minor issues" },
+  { band: "rough", from: 50, label: "rough" },
+  { band: "poor", from: 75, label: "poor" },
+];
+
+export function healthBand(score: number): HealthBand {
+  if (score >= 75) return "poor";
+  if (score >= 50) return "rough";
+  if (score >= 25) return "minor-issues";
+  return "solid";
+}
+
+/** The scale a dimension is drawn on, or none if it does not carry a score. */
+export function bandsFor(
+  dimension: string,
+): readonly { from: number; label: string }[] {
+  return dimension === "health" ? HEALTH_BANDS : AUTHORSHIP_BANDS;
+}
+
 /** How a confidence level should be described to a reader. */
 export function confidencePhrase(confidence: Confidence): string {
   switch (confidence) {

@@ -6,6 +6,7 @@ import type { Metric, ScanResult } from "@vibe/shared";
 
 import { analyzeAuthorship, type AuthorshipOptions } from "./analyzers/authorship/index";
 import type { AnalysisContext } from "./analyzers/context";
+import { analyzeHealth } from "./analyzers/health/index";
 import {
   GitHubError,
   fetchCommits,
@@ -74,6 +75,9 @@ export async function scanRepository(
     options.git ? { git: options.git } : {},
   );
   const authorship = analyzeAuthorship(ctx, options);
+  // Health re-weights the structural signals authorship already computed rather
+  // than measuring them again — see `analyzers/health/index.ts`.
+  const health = analyzeHealth(ctx, authorship.score.signals);
 
   const warnings = [
     ...ctx.files.warnings,
@@ -98,7 +102,8 @@ export async function scanRepository(
       languages: ctx.languages.shares,
       analysisTier: ctx.languages.dominantTier,
     },
-    scores: [authorship.score],
+    // Authorship first: the narrator takes its headline from `scores[0]`.
+    scores: [authorship.score, health.score],
     findings: authorship.findings,
     metrics: collectMetrics(ctx, authorship.clones.clonedFunctions),
     /*
