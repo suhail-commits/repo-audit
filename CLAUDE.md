@@ -122,6 +122,93 @@ codebases, and which repo broke it is the most useful fact in the message — wr
 8. **Ask before destroying.** Deletions, overwrites and history rewrites get confirmed first —
    especially anything not yet pushed, which has no remote copy to recover from.
 
+## Execution flow
+
+### The loop
+
+Every task runs this sequence. Steps are not skipped because something "looks small" — the
+expensive mistakes in this repo all came from skipping step 2.
+
+1. **Understand.** Restate the ask in one line. Find the code that already does something similar
+   and reuse it. `scanRepository()`, `TemplateNarrator`, `createFixtureRepo()` and the extraction
+   guards all exist; rebuilding them is a bug, not a contribution.
+2. **Verify the assumptions the change rests on.** Read the file, check the installed version, run
+   the command. Do not build on top of a belief.
+3. **Change in small steps.** One coherent thing at a time, with the test written alongside — not
+   a large edit followed by a hunt for what broke.
+4. **Pass the gate** (below). Non-negotiable.
+5. **Commit** at that checkpoint, using the template for the type.
+6. **Report** what happened, including what did not work and what was left out.
+
+### The gate — before every commit
+
+```bash
+pnpm vitest run      # all green
+pnpm typecheck       # covers packages AND apps/web
+```
+
+Additionally, **if a signal, index, or the scorer changed**:
+
+```bash
+pnpm scan .          # this repo must score 0-5 with signals reading 0.00
+pnpm sweep           # median ~7, max under 30, nothing claiming `certain`
+```
+
+`pnpm scan .` is the fastest real check that exists: our own code is hand-written, so any signal
+firing on it is a false positive, not a result. That check alone has caught two bugs.
+
+### Deciding versus asking
+
+- **Decide alone** when the choice is reversible, internal, and has a conventional default. State
+  the choice in the report and move on.
+- **Ask first** when different readings produce materially different work, when the action is
+  outward-facing (pushing, deploying, creating a repo), or when it destroys something. There is no
+  undo for a delete beyond the last commit, and unpushed commits have no remote copy.
+- **When a plan turns out wrong mid-way**, stop and say so rather than forcing the original
+  approach through. Report what was learned, propose the correction, and do not quietly widen scope
+  to accommodate it.
+
+### Playbook — adding or changing a provenance signal
+
+1. Implement in `packages/engine/src/analyzers/provenance/`, returning a `Signal`. If inputs can be
+   missing, return `available: false` with an `unavailableReason` — **never** a value of 0.
+2. Register it with a weight in `analyzers/provenance/index.ts`.
+3. If it emits a `Finding`, write its template in `packages/rules/src/templates.ts`.
+   `narrator.test.ts` fails if an engine rule falls through to the generic fallback.
+4. Unit-test both directions against `createFixtureRepo()`: the case that fires, and a clean case
+   that must stay silent. The silent case is the one that matters.
+5. Run `pnpm scan .`, then `pnpm sweep`. A signal that fires on hand-written code is not finished.
+6. If it can be unavailable, prove the degradation lowers *confidence* and leaves the score alone.
+
+### Playbook — a false positive found on a real repo
+
+1. **Reproduce it directly first**, calling the analyzer against the cloned repo, before changing a
+   line. Twice in this project a "fix" was judged against a stale worker process still running the
+   old code.
+2. Fix the cause, not the symptom. Three assertion-style bugs shipped separately because each was
+   patched as a one-off instead of at the import level.
+3. Add a regression test that **names the repo** that exposed it.
+4. Re-run `pnpm sweep` and compare the before/after numbers explicitly.
+5. Add an entry to *Bugs worth remembering* with the repo and the figure.
+
+### Playbook — adding a dependency
+
+1. Justify it beyond convenience. Six runtime dependencies today, in a tool that flags dependency bloat.
+2. Confirm it installs on Windows with no build toolchain — prebuilt binaries or WASM only.
+3. Native bindings or runtime file access → add to `serverExternalPackages` in
+   `apps/web/next.config.ts`, or it breaks only at runtime.
+4. Confirm it survives the deploy target: no `git` binary, no writable filesystem outside `/tmp`,
+   a hard function duration cap.
+
+### Playbook — upgrading `oxc-parser`
+
+Pre-1.0, ships a minor roughly weekly, and has already renamed AST nodes once — silently returning
+zero routes rather than erroring.
+
+1. Upgrade deliberately, never as part of a blanket update.
+2. Run `pnpm vitest run parser-contract` **first**; it pins the node names and module-record shape.
+3. Then the full suite and `pnpm sweep`.
+
 ---
 
 ## Invariants
