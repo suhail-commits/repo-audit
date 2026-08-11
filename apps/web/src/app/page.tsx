@@ -15,10 +15,16 @@ export default async function HomePage() {
     <main>
       <section className="hero">
         <h1>How much of your codebase did AI actually write?</h1>
+        {/*
+          The picker below now offers more than the AI score, so the lede has
+          to as well — promising one thing and then asking which of three they
+          want reads as a page that was edited in two halves.
+        */}
         <p>
           Paste a public GitHub repository. You get a score for how much of it
-          looks AI-generated, and every piece of evidence behind that number
-          &mdash; read from the code and the commit history, not guessed at.
+          looks AI-generated, a read on the state of the code, and every piece
+          of evidence behind both &mdash; taken from the code and the commit
+          history, not guessed at.
         </p>
         <ul className="hero-note">
           <li>No sign-up, no GitHub access</li>

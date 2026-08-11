@@ -96,8 +96,12 @@ codebases, and which repo broke it is the most useful fact in the message — wr
   `feat/<short-name>` / `fix/<short-name>`.
 - **Never force-push** a shared branch, and never rewrite pushed history, without an explicit
   instruction.
-- Commit at each logical checkpoint — a working, tested unit of change — not once per session and
-  not once per file.
+- **Never commit without being asked.** Finish the work, pass the gate, then *report and stop* —
+  say what changed and what the gate returned, and wait. A commit made before I have looked at the
+  code is a commit spent on something I may not want, and undoing it costs more than waiting did.
+  This is the same rule as pushing, one step earlier.
+- When I do say commit, commit at each logical checkpoint — a working, tested unit of change — not
+  once per session and not once per file.
 
 ## How I work
 
@@ -150,12 +154,21 @@ pnpm typecheck       # covers packages AND apps/web
 Additionally, **if a signal, index, or the scorer changed**:
 
 ```bash
-pnpm scan .          # this repo must score 0-5 with signals reading 0.00
-pnpm sweep           # median ~7, max under 30, nothing claiming `certain`
+pnpm scan .          # authorship ~26, health ~10; see below for which signals may fire
+pnpm sweep           # median ~6, max under 30, nothing claiming `certain`
 ```
 
-`pnpm scan .` is the fastest real check that exists: our own code is hand-written, so any signal
-firing on it is a false positive, not a result. That check alone has caught two bugs.
+`pnpm scan .` is the fastest real check that exists, but it is **no longer a "everything must read
+0.00" check** — three signals legitimately fire on this repository and knowing which is the point:
+
+- `agent-tooling` **1.00** — `CLAUDE.md` is right there. Correct, and the reason the signal exists.
+- `commit-size` **1.00** and `build-velocity` **1.00** — this repo's history is short and dense
+  (one active day, one author, thousands of lines), which is genuinely the shape those signals
+  look for.
+
+**Anything beyond those three firing is a false positive to investigate.** `build-velocity` at 1.00
+off a single active day is a weakness worth revisiting — lines-per-day computed over one day is not
+a rate — but that is a signal change and needs deciding, not patching mid-task.
 
 ### Deciding versus asking
 
@@ -300,9 +313,11 @@ pnpm report <path> --persona=founder     # the narrated report
 pnpm web                                 # Next.js dev server
 ```
 
-**`pnpm scan .` on this repo is the fastest sanity check.** It should score 0–5/100 with every
-available signal reading `0.00`. Any signal that starts firing on our own hand-written code is a
-false positive to investigate, not a result — that check has already caught two real bugs.
+**`pnpm scan .` on this repo is the fastest sanity check.** Authorship lands around 26 and health
+around 10, with `agent-tooling`, `commit-size` and `build-velocity` the only signals that should be
+above zero — see *The gate* for why each of those is legitimate. A **fourth** signal firing on our
+own hand-written code is a false positive to investigate, not a result; that check has already
+caught two real bugs.
 
 ---
 
@@ -326,7 +341,13 @@ pasting their own repo and getting an obviously wrong answer. Its first run foun
 false positives, all listed below. Clones are full, not shallow — a shallow clone compresses the
 active-day span and makes `build-velocity` fire spuriously.
 
-Current baseline: **median 7, max 19, none above 30, none claiming `certain`.**
+Current baseline: **median 6, max 28, none above 30, none claiming `certain`.**
+
+The max moved 19 → 28 when `agent-tooling` landed, and that is a correct result rather than a
+regression: `colinhacks/zod` and `remeda/remeda` both carry committed agent configuration, and
+`tkem/cachetools` scores 24 on real duplication. **When a sweep number rises, find the repo and
+read its evidence before touching the signal.** Restoring an old number by weakening detection is
+the one move that is never allowed here.
 
 ---
 
@@ -404,6 +425,19 @@ Each was a confidently-wrong result that looked correct until tested against rea
 - **Destructured assertions read as no assertions.** `import { equal } from 'node:assert'` binds a
   name matching no known assertion root, so all 52 of `ai/nanoid`'s tests reported "assert nothing
   at all". Local bindings imported from assertion modules now count.
+- **`tsd` type tests read as dead code.** `test-d/*.test-d.ts` matched no test pattern, so on
+  `sindresorhus/execa` 151 of 261 files counted as authored source that nothing imports —
+  `orphan-files` maxed at 1.00 and health scored 22 on a well-kept repository. Nothing is *meant*
+  to import a type test; `tsd` reads them directly. Fourth entry in the same family as the bare
+  `test.js` and top-level `test/` cases: **a test convention we do not recognise becomes a finding
+  about dead code.**
+- **No HTTP route was ever found in a monorepo.** Both Next patterns were anchored to the scan
+  root (`/^(?:src\/)?app\/…/`), so `apps/web/src/app/api/scans/route.ts` matched nothing. Seen on
+  `suhail-commits/repo-audit` — this tool reported 0 routes in its own repository, which has one.
+  Third instance of the same root-anchoring mistake, after monorepo entry points and top-level
+  `test/`. The segment is now matched anywhere in the path, still exactly (`my-app/` does not
+  match). **This one hid for a long time because nothing consumed the route count** — it surfaced
+  only when the Security section started printing it.
 
 The pattern: **a signal that cannot see something reports its absence as a finding.** When adding a
 signal, ask what it looks like on a codebase that legitimately does things differently.
@@ -412,7 +446,8 @@ signal, ask what it looks like on a codebase that legitimately does things diffe
 
 ## Current state
 
-Built and passing (104 tests): GitHub API ingest, index layer, 14 authorship signals (calibrated),
+Built and passing (113 tests): GitHub API ingest, index layer, 14 authorship signals plus a
+7-signal health dimension (calibrated),
 tiered multi-language analysis, scoring, narrator with three personas, and a Vercel-ready web app
 that scans inline with no worker or queue.
 
@@ -420,9 +455,17 @@ that scans inline with no worker or queue.
 absorbed what were separate `quality` and `architecture` dimensions — they asked the same question
 and split into two thin sections instead of one substantial one.
 
+`authorship` and `health` both carry a score; `security` has no analyzer. **Both scores run the
+same direction — higher means more of what was measured**, so the health bars still sum to the
+health score. Inverting health so 85 reads as "healthy" would make the bars sum to `100 − score`
+and cost the breakdown its whole argument. The band words carry the direction instead
+(`solid` / `minor issues` / `rough` / `poor`).
+
 The six structural signals (duplication, dead code, obvious comments, tautological tests, unused
-deps, overlapping utils) feed authorship as *evidence* while their findings are filed under health
-as *defects*. One measurement, two questions.
+deps, overlapping utils) feed authorship as *evidence* while the same measurements, re-weighted,
+feed health as *defects*. **`analyzeHealth` borrows the `Signal` objects from the authorship pass
+and replaces only their weights** — recomputing would double the cost of clone hashing and, worse,
+would let the same measurement print two different numbers in two sections.
 
 Not built: the security analyzer — no rule emits a `security` finding yet — and BYOK.
 `ScanResult.analysedDimensions` names the dimensions an analyzer actually ran for, so the report

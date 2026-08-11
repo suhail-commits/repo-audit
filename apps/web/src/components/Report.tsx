@@ -20,23 +20,56 @@ const PERSONA_LABELS: Record<Persona, string> = {
   acquirer: "Buyer",
 };
 
-/** What the authorship number is measuring, said in the reader's register. */
-const SCORE_CAPTION: Record<Persona, string> = {
-  founder: "how much looks AI-written",
-  engineer: "authorship",
-  acquirer: "AI-generation likelihood",
+/**
+ * What each number is measuring, in the reader's register.
+ *
+ * Both scores run the same direction — higher is more of what was measured —
+ * so the health caption has to say "problems found" rather than name the
+ * section, or the reader supplies the opposite meaning from the word "health".
+ */
+const SCORE_CAPTION: Record<Dimension, Record<Persona, string>> = {
+  authorship: {
+    founder: "how much looks AI-written",
+    engineer: "authorship",
+    acquirer: "AI-generation likelihood",
+  },
+  health: {
+    founder: "problems found",
+    engineer: "problems found — higher is worse",
+    acquirer: "maintenance debt",
+  },
+  security: {
+    founder: "problems found",
+    engineer: "problems found — higher is worse",
+    acquirer: "exposure",
+  },
 };
 
 export function Report({
   scanId,
   result,
   persona,
+  focus,
 }: {
   scanId: string;
   result: ScanResult;
   persona: Persona;
+  /** The question asked on the landing page. Decides which section leads. */
+  focus: Dimension;
 }) {
   const report = narrator.report(result, persona);
+
+  const sectionOf = (dimension: Dimension) => ({
+    dimension,
+    // Numbering follows the canonical order, not the display order, so a
+    // section keeps the same number whichever question was asked.
+    index: DIMENSIONS.indexOf(dimension) + 1,
+    findings: report.findings.filter((f) => f.dimension === dimension),
+    narrated: report.scores.find((s) => s.dimension === dimension),
+  });
+
+  const lead = sectionOf(focus);
+  const rest = DIMENSIONS.filter((d) => d !== focus).map(sectionOf);
 
   return (
     <main>
@@ -50,7 +83,9 @@ export function Report({
             {PERSONAS.map((option) => (
               <a
                 key={option}
-                href={`/scan/${scanId}?persona=${option}`}
+                // Carry the focus through, or switching persona would silently
+                // reorder the report back to its default section.
+                href={`/scan/${scanId}?persona=${option}&focus=${focus}`}
                 aria-current={option === persona}
               >
                 {PERSONA_LABELS[option]}
@@ -67,27 +102,51 @@ export function Report({
         directly above a section containing none of them.
       */}
       <section className="verdict">
-        <h2>{report.headline}</h2>
+        {/*
+          The opening sentence follows the question that was asked. Leading with
+          the authorship verdict above a report that opens on Code health reads
+          as though the page ignored the choice.
+        */}
+        <h2>{lead.narrated?.headline ?? report.headline}</h2>
         <p>{report.summary}</p>
         <p className="verdict-line">{report.verdict}</p>
       </section>
 
+      <p className="focus-note">
+        You asked about{" "}
+        <strong>{dimensionLabel(focus, persona).title.toLowerCase()}</strong>
+      </p>
+
+      <DimensionSection {...lead} persona={persona} result={result} />
+
       {/*
-        One section per dimension, always all three, always in the same order —
-        including the ones with nothing in them. A section that disappears when
-        it has no analyzer is indistinguishable from a section that ran and
-        found nothing wrong, and only one of those is true here.
+        The other two are always present, never dropped. A section that
+        disappeared would be indistinguishable from one that ran and found
+        nothing — and for Security, from one that has no analyzer at all.
+        Collapsed rather than hidden: the summary carries the headline fact, so
+        the reader learns the outcome without opening anything.
       */}
-      {DIMENSIONS.map((dimension, i) => (
-        <DimensionSection
-          key={dimension}
-          index={i + 1}
-          dimension={dimension}
-          persona={persona}
-          result={result}
-          findings={report.findings.filter((f) => f.dimension === dimension)}
-          narrated={report.scores.find((s) => s.dimension === dimension)}
-        />
+      <h3 className="also-checked">Also checked</h3>
+      {rest.map((section) => (
+        <details className="dimension-collapsed" key={section.dimension}>
+          <summary>
+            <span className="dimension-index" aria-hidden="true">
+              {section.index}
+            </span>
+            <span className="dimension-collapsed-title">
+              {dimensionLabel(section.dimension, persona).title}
+            </span>
+            <span className="dimension-collapsed-state">
+              {summaryOf(section, result)}
+            </span>
+          </summary>
+          <DimensionSection
+            {...section}
+            persona={persona}
+            result={result}
+            headless
+          />
+        </details>
       ))}
 
       {result.warnings.length > 0 ? (
@@ -111,6 +170,35 @@ export function Report({
 
 // ---------------------------------------------------------------------------
 
+interface Section {
+  index: number;
+  dimension: Dimension;
+  findings: NarratedFinding[];
+  narrated?: NarratedScore;
+}
+
+/**
+ * The one fact a collapsed section has to carry.
+ *
+ * Whatever this says is what most readers will take away about that dimension,
+ * since a collapsed section is one most people never open. "Not analysed yet"
+ * has to be as legible here as it is inside.
+ */
+function summaryOf(section: Section, result: ScanResult): string {
+  if (!result.analysedDimensions.includes(section.dimension)) {
+    return "not analysed yet";
+  }
+
+  const score = result.scores.find((s) => s.dimension === section.dimension);
+  if (score) return `${score.score} / 100`;
+
+  const actionable = section.findings.filter((f) => f.severity !== "info");
+  if (actionable.length === 0) return "nothing worth flagging";
+  return actionable.length === 1
+    ? "1 thing worth a look"
+    : `${actionable.length} things worth a look`;
+}
+
 function DimensionSection({
   index,
   dimension,
@@ -118,13 +206,12 @@ function DimensionSection({
   result,
   findings,
   narrated,
-}: {
-  index: number;
-  dimension: Dimension;
+  headless = false,
+}: Section & {
   persona: Persona;
   result: ScanResult;
-  findings: NarratedFinding[];
-  narrated?: NarratedScore;
+  /** Nested inside a `<details>`, whose summary already names the section. */
+  headless?: boolean;
 }) {
   const label = dimensionLabel(dimension, persona);
   // The narrator carries prose; the breakdown needs the raw signals, which only
@@ -141,23 +228,32 @@ function DimensionSection({
   const analysed = result.analysedDimensions.includes(dimension);
 
   return (
-    <section className="dimension" id={dimension}>
-      <div className="dimension-head">
-        <span className="dimension-index" aria-hidden="true">
-          {index}
-        </span>
-        <div className="dimension-title">
-          <h2>{label.title}</h2>
-          <p className="dimension-covers">{label.covers}</p>
+    <section
+      className={`dimension${headless ? " dimension-nested" : ""}`}
+      id={dimension}
+    >
+      {headless ? null : (
+        <div className="dimension-head">
+          <span className="dimension-index" aria-hidden="true">
+            {index}
+          </span>
+          <div className="dimension-title">
+            <h2>{label.title}</h2>
+            <p className="dimension-covers">{label.covers}</p>
+          </div>
+          {analysed ? null : (
+            <span className="dimension-state">not analysed yet</span>
+          )}
         </div>
-        {analysed ? null : (
-          <span className="dimension-state">not analysed yet</span>
-        )}
-      </div>
+      )}
 
       {score ? (
         <div className="score-panel">
-          <ScoreScale score={score.score} caption={SCORE_CAPTION[persona]} />
+          <ScoreScale
+            dimension={dimension}
+            score={score.score}
+            caption={SCORE_CAPTION[dimension][persona]}
+          />
 
           {/*
             Coverage stated as a fact, not a failure. "Some checks could not
@@ -169,6 +265,14 @@ function DimensionSection({
             total={score.signals.length}
           />
         </div>
+      ) : null}
+
+      {/*
+        The lead section's headline is already the page headline above, so only
+        the collapsed ones restate theirs.
+      */}
+      {headless && narrated ? (
+        <p className="dimension-headline">{narrated.headline}</p>
       ) : null}
 
       {narrated && narrated.evidence.length > 0 ? (

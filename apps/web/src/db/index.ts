@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import { neon } from "@neondatabase/serverless";
-import type { Persona, ScanResult } from "@vibe/shared";
+import type { Dimension, Persona, ScanResult } from "@vibe/shared";
 
 /**
  * Scan store.
@@ -20,6 +20,8 @@ export interface ScanRecord {
   createdAt: number;
   slug: string;
   persona: Persona;
+  /** The question the visitor came to ask. Decides which section leads. */
+  focus: Dimension;
   result: ScanResult | null;
   error: string | null;
   /** Curated scans shown on the landing page. */
@@ -29,11 +31,17 @@ export interface ScanRecord {
 export interface NewScan {
   slug: string;
   persona: Persona;
+  focus: Dimension;
   result?: ScanResult;
   error?: string;
   isExample?: boolean;
 }
 
+/**
+ * `CREATE TABLE IF NOT EXISTS` does nothing to a table that already exists, so
+ * a new column needs its own statement — without it the deployed database keeps
+ * the old shape and every insert fails on a column that is not there.
+ */
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS scans (
     id          UUID PRIMARY KEY,
@@ -45,6 +53,10 @@ const SCHEMA = `
     is_example  BOOLEAN NOT NULL DEFAULT FALSE
   )
 `;
+
+const MIGRATIONS = [
+  `ALTER TABLE scans ADD COLUMN IF NOT EXISTS focus TEXT NOT NULL DEFAULT 'authorship'`,
+];
 
 type SqlClient = ReturnType<typeof neon>;
 
@@ -66,6 +78,7 @@ function sql(): SqlClient | null {
 async function ensureSchema(db: SqlClient): Promise<void> {
   schemaReady ??= (async () => {
     await db.query(SCHEMA);
+    for (const migration of MIGRATIONS) await db.query(migration);
   })();
   await schemaReady;
 }
@@ -114,6 +127,7 @@ export async function createScan(input: NewScan): Promise<string> {
       createdAt: Date.now(),
       slug: input.slug,
       persona: input.persona,
+      focus: input.focus,
       result: input.result ?? null,
       error: input.error ?? null,
       isExample: input.isExample ?? false,
@@ -123,12 +137,13 @@ export async function createScan(input: NewScan): Promise<string> {
 
   await ensureSchema(db);
   await db.query(
-    `INSERT INTO scans (id, slug, persona, result, error, is_example)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
+    `INSERT INTO scans (id, slug, persona, focus, result, error, is_example)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
     [
       id,
       input.slug,
       input.persona,
+      input.focus,
       input.result ? JSON.stringify(input.result) : null,
       input.error ?? null,
       input.isExample ?? false,
@@ -185,6 +200,10 @@ function toRecord(row: Record<string, unknown>): ScanRecord {
     createdAt: new Date(String(row["created_at"])).getTime(),
     slug: String(row["slug"]),
     persona: String(row["persona"]) as Persona,
+    // Rows written before the column existed default to the authorship section.
+    focus: (row["focus"] == null
+      ? "authorship"
+      : String(row["focus"])) as Dimension,
     // jsonb comes back already parsed; a text column would not.
     result:
       result == null

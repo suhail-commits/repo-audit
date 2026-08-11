@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 
-import { PERSONAS, type Persona } from "@vibe/shared";
+import { DIMENSIONS, PERSONAS } from "@vibe/shared";
 
 import { Report } from "@/components/Report";
 import { getScan } from "@/db";
@@ -21,13 +21,17 @@ export default async function ScanPage({
   const scan = await getScan(id);
   if (!scan) notFound();
 
-  // The persona chosen at submission is the default; the report's switcher
-  // overrides it per view without changing the stored scan.
-  const requested =
-    typeof query["persona"] === "string" ? query["persona"] : undefined;
-  const persona: Persona = PERSONAS.includes(requested as Persona)
-    ? (requested as Persona)
-    : scan.persona;
+  /*
+   * The stored value is a default, not a guarantee.
+   *
+   * Both of these are read from a query string *and* from a row that may
+   * predate the column — the earlier version of this validated only the query
+   * string and fell back to `scan.focus` unchecked, so a scan stored before
+   * `focus` existed reached `dimensionLabel(undefined)` and crashed the page.
+   * Validate at the boundary, both sides.
+   */
+  const persona = pick(query["persona"], scan.persona, PERSONAS, "founder");
+  const focus = pick(query["focus"], scan.focus, DIMENSIONS, "authorship");
 
   if (!scan.result) {
     return (
@@ -46,5 +50,34 @@ export default async function ScanPage({
     );
   }
 
-  return <Report scanId={scan.id} result={scan.result} persona={persona} />;
+  return (
+    <Report
+      scanId={scan.id}
+      result={scan.result}
+      persona={persona}
+      focus={focus}
+    />
+  );
+}
+
+/**
+ * First of `requested` / `stored` that is actually one of `allowed`.
+ *
+ * Both inputs cross a trust boundary — one is a query string, the other a
+ * database row whose shape can predate the code reading it — and neither is
+ * worth trusting because TypeScript says it has a type.
+ */
+function pick<T extends string>(
+  requested: string | string[] | undefined,
+  stored: unknown,
+  allowed: readonly T[],
+  fallback: T,
+): T {
+  if (typeof requested === "string" && allowed.includes(requested as T)) {
+    return requested as T;
+  }
+  if (typeof stored === "string" && allowed.includes(stored as T)) {
+    return stored as T;
+  }
+  return fallback;
 }

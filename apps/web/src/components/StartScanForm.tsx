@@ -3,21 +3,39 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 
-const PERSONA_CHOICES = [
+/**
+ * The one question the landing page asks.
+ *
+ * Not which analyzers run — a scan always produces all three, because the
+ * indexes are shared and skipping one saves almost nothing. It decides which
+ * section the report leads with.
+ *
+ * The persona question that used to live here has moved into the report, where
+ * a switcher already exists. Two pickers in front of a text field is a lot to
+ * ask before anyone has seen what the product does, and asking a question the
+ * report then re-asks is worse than not asking it.
+ */
+const FOCUS_CHOICES = [
   {
-    value: "founder",
-    label: "I run this product",
-    hint: "Plain English, and what each problem could actually cost you.",
+    value: "authorship",
+    label: "Was this vibe coded?",
+    hint: "How much of it looks AI-written, and the evidence for that.",
   },
   {
-    value: "engineer",
-    label: "I write the code",
-    hint: "File and line numbers, with the fix.",
+    value: "health",
+    label: "Is this code any good?",
+    hint: "Duplication, dead code, tests, and how it is put together.",
   },
   {
-    value: "acquirer",
-    label: "I'm evaluating this codebase",
-    hint: "Risk rating and an estimate of the work needed to fix it.",
+    value: "security",
+    label: "Is this safe?",
+    hint: "Exposed keys, unprotected pages, risky code.",
+    /*
+     * Offered but not selectable. Hiding it would misrepresent the product's
+     * shape; letting it be picked would answer "not analysed yet" to the one
+     * question the visitor came with.
+     */
+    unavailable: "not built yet",
   },
 ] as const;
 
@@ -36,7 +54,7 @@ const STAGES = [
 
 export function StartScanForm() {
   const router = useRouter();
-  const [persona, setPersona] = useState<string>("founder");
+  const [focus, setFocus] = useState<string>("authorship");
   const [repo, setRepo] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -66,7 +84,7 @@ export function StartScanForm() {
     );
 
     const body = new FormData();
-    body.set("persona", persona);
+    body.set("focus", focus);
     body.set("repo", repo);
 
     try {
@@ -91,6 +109,41 @@ export function StartScanForm() {
 
   return (
     <form className="card" onSubmit={onSubmit}>
+      {/* The question comes before the input: decide what you want to know,
+          then say which repository to look at. */}
+      <fieldset className="field fieldset-reset">
+        <legend>What do you want to check?</legend>
+        <p className="hint">
+          We run every check either way &mdash; this decides what the report
+          leads with.
+        </p>
+        <div className="choices">
+          {FOCUS_CHOICES.map((choice) => {
+            const unavailable = "unavailable" in choice;
+            return (
+              <label
+                className={`choice${unavailable ? " choice-unavailable" : ""}`}
+                key={choice.value}
+              >
+                <input
+                  type="radio"
+                  name="focus"
+                  value={choice.value}
+                  checked={focus === choice.value}
+                  disabled={busy || unavailable}
+                  onChange={() => setFocus(choice.value)}
+                />
+                <strong>{choice.label}</strong>
+                <em>{choice.hint}</em>
+                {unavailable ? (
+                  <span className="choice-badge">{choice.unavailable}</span>
+                ) : null}
+              </label>
+            );
+          })}
+        </div>
+      </fieldset>
+
       <div className="field">
         <label htmlFor="repo">Public GitHub repository</label>
         <p className="hint">
@@ -108,27 +161,6 @@ export function StartScanForm() {
           disabled={busy}
         />
       </div>
-
-      <fieldset className="field fieldset-reset">
-        <legend>Who&rsquo;s reading this report?</legend>
-        <p className="hint">This only changes how results are explained.</p>
-        <div className="choices">
-          {PERSONA_CHOICES.map((choice) => (
-            <label className="choice" key={choice.value}>
-              <input
-                type="radio"
-                name="persona"
-                value={choice.value}
-                checked={persona === choice.value}
-                disabled={busy}
-                onChange={() => setPersona(choice.value)}
-              />
-              <strong>{choice.label}</strong>
-              <em>{choice.hint}</em>
-            </label>
-          ))}
-        </div>
-      </fieldset>
 
       <button type="submit" disabled={busy}>
         {busy ? "Analysing…" : "Analyse this codebase"}
