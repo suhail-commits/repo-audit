@@ -17,3 +17,4 @@ export {
   labelledSignalIds,
   type SignalLabel,
 } from "./signal-labels";
+export { dimensionLabel, type DimensionLabel } from "./dimension-labels";

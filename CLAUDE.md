@@ -412,13 +412,23 @@ signal, ask what it looks like on a codebase that legitimately does things diffe
 
 ## Current state
 
-Built and passing (91 tests): GitHub API ingest, index layer, 13 authorship signals (calibrated),
+Built and passing (104 tests): GitHub API ingest, index layer, 14 authorship signals (calibrated),
 tiered multi-language analysis, scoring, narrator with three personas, and a Vercel-ready web app
 that scans inline with no worker or queue.
 
-Not built: security analyzer (`auth-coverage` and friends), quality analyzer, architecture
-analyzer, BYOK. `ScanResult.architecture` deliberately returns `insufficient-evidence` rather than
-a fabricated verdict.
+**The report is three dimensions**: `authorship` (the vibe check), `security`, `health`. `health`
+absorbed what were separate `quality` and `architecture` dimensions — they asked the same question
+and split into two thin sections instead of one substantial one.
+
+The six structural signals (duplication, dead code, obvious comments, tautological tests, unused
+deps, overlapping utils) feed authorship as *evidence* while their findings are filed under health
+as *defects*. One measurement, two questions.
+
+Not built: the security analyzer — no rule emits a `security` finding yet — and BYOK.
+`ScanResult.analysedDimensions` names the dimensions an analyzer actually ran for, so the report
+can render an unbuilt section as "not analysed yet" instead of as a pass. **Add a dimension to
+that array in the same commit that registers its analyzer**; a section that ran and found nothing
+is otherwise indistinguishable from one that never looked.
 
 ### Deployment shape
 

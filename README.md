@@ -185,8 +185,15 @@ carefully written codebase — whoever or whatever wrote it — that is exactly 
 
 ## Status
 
-Authorship analysis is complete and calibrated. Security analysis — route-level auth coverage,
-missing tenant filters, exposed secrets — is the next piece, and is deliberately JavaScript and
-TypeScript only, because those rules need framework semantics rather than syntax.
-`ScanResult.architecture` returns `insufficient-evidence` rather than inventing a verdict for an
-analyzer that has not been written.
+The report is three sections: **authorship** (how much looks AI-written), **security**, and
+**health** (duplication, dead code, test quality, structure).
+
+Authorship analysis is complete and calibrated, and health is populated from the structural
+signals. Security analysis — exposed secrets, route-level auth coverage, dangerous sinks — is the
+next piece; secrets detection works on any language, the rest is deliberately JavaScript and
+TypeScript only because those rules need framework semantics rather than syntax.
+
+The Security section renders as **"not analysed yet"** rather than being hidden. An absent section
+reads as a clean bill of health, and only one of those is true. `ScanResult.analysedDimensions`
+records which dimensions an analyzer actually ran for, because a dimension that ran and found
+nothing produces output identical to one that never looked.

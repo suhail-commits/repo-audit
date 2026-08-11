@@ -263,7 +263,7 @@ export function deadCodeFindings(ctx: AnalysisContext): Finding[] {
   if (unused.length > 0) {
     findings.push({
       ruleId: "unused-dependencies",
-      dimension: "authorship",
+      dimension: "health",
       severity: unused.length >= 5 ? "medium" : "low",
       confidence: "medium",
       source: "builtin",

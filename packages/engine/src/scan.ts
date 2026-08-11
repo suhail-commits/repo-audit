@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import type { ArchitectureAssessment, Metric, ScanResult } from "@vibe/shared";
+import type { Metric, ScanResult } from "@vibe/shared";
 
 import { analyzeAuthorship, type AuthorshipOptions } from "./analyzers/authorship/index";
 import type { AnalysisContext } from "./analyzers/context";
@@ -101,7 +101,12 @@ export async function scanRepository(
     scores: [authorship.score],
     findings: authorship.findings,
     metrics: collectMetrics(ctx, authorship.clones.clonedFunctions),
-    architecture: PENDING_ARCHITECTURE,
+    /*
+     * `security` is absent because no security analyzer exists yet — see the
+     * deferred work in README. Add it here in the same commit that registers
+     * the analyzer, so the report can never claim a check that did not run.
+     */
+    analysedDimensions: ["authorship", "health"],
     durationMs: Date.now() - started,
     warnings,
   };
@@ -198,19 +203,6 @@ export async function scanGitHubRepository(
 }
 
 /**
- * The architecture analyzer lands in a later phase. It reports
- * `insufficient-evidence` rather than a verdict so the report never implies an
- * assessment that was not actually performed.
- */
-const PENDING_ARCHITECTURE: ArchitectureAssessment = {
-  verdict: "insufficient-evidence",
-  modularity: 0,
-  moduleCount: 0,
-  serviceCount: 0,
-  evidence: ["Architecture analysis is not yet implemented"],
-};
-
-/**
  * Say plainly which parts of the repository could not be read.
  *
  * A language we cannot parse is a gap in the evidence, not a clean bill of
@@ -246,14 +238,14 @@ function collectMetrics(ctx: AnalysisContext, clonedFunctions: number): Metric[]
   return [
     {
       id: "source-files",
-      dimension: "quality",
+      dimension: "health",
       label: "Source files",
       value: ctx.files.sourceFiles().length,
       unit: "count",
     },
     {
       id: "source-lines",
-      dimension: "quality",
+      dimension: "health",
       label: "Lines of source",
       value: ctx.files.totalSloc,
       unit: "loc",
@@ -273,8 +265,13 @@ function collectMetrics(ctx: AnalysisContext, clonedFunctions: number): Metric[]
       unit: "count",
     },
     {
+      /*
+       * Health, not authorship: the duplication *findings* are filed under
+       * health, and a count sitting in one section while the findings it
+       * counts sit in another reads as two different measurements.
+       */
       id: "duplicate-functions",
-      dimension: "authorship",
+      dimension: "health",
       label: "Structurally duplicated functions",
       value: clonedFunctions,
       unit: "count",

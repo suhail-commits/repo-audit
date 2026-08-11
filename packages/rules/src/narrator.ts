@@ -31,6 +31,7 @@ export class TemplateNarrator implements Narrator {
 
     return {
       ruleId: finding.ruleId,
+      dimension: finding.dimension,
       severity: finding.severity,
       title: template.title(finding.data, finding),
       body: personaTemplate.body(finding.data, finding),

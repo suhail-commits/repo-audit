@@ -9,14 +9,20 @@ export type Persona = "founder" | "engineer" | "acquirer";
 
 export const PERSONAS: readonly Persona[] = ["founder", "engineer", "acquirer"];
 
-/** The four questions the product answers. */
-export type Dimension = "authorship" | "security" | "quality" | "architecture";
+/**
+ * The three questions the product answers.
+ *
+ * `health` absorbs what were separate `quality` and `architecture` dimensions.
+ * They asked the same question — is this codebase in good shape — and splitting
+ * them produced two thin sections instead of one substantial one. Structure
+ * findings (coupling, cycles, oversized modules) are health findings.
+ */
+export type Dimension = "authorship" | "security" | "health";
 
 export const DIMENSIONS: readonly Dimension[] = [
   "authorship",
   "security",
-  "quality",
-  "architecture",
+  "health",
 ];
 
 export type Severity = "critical" | "high" | "medium" | "low" | "info";
@@ -133,23 +139,6 @@ export interface DimensionScore {
   unavailable: string[];
 }
 
-/** The architecture verdict, with the evidence that produced it. */
-export type ArchitectureVerdict =
-  | "stay-monolith"
-  | "split-candidate"
-  | "distributed-monolith"
-  | "already-appropriate"
-  | "insufficient-evidence";
-
-export interface ArchitectureAssessment {
-  verdict: ArchitectureVerdict;
-  /** Newman modularity Q of the import graph, 0..1. */
-  modularity: number;
-  moduleCount: number;
-  serviceCount: number;
-  evidence: string[];
-}
-
 /**
  * How deeply a language can be analyzed.
  *
@@ -209,7 +198,15 @@ export interface ScanResult {
   scores: DimensionScore[];
   findings: Finding[];
   metrics: Metric[];
-  architecture: ArchitectureAssessment;
+  /**
+   * Which dimensions an analyzer actually ran for.
+   *
+   * Not derivable from `scores` or `findings`: a dimension that ran and found
+   * nothing produces exactly the same empty output as one with no analyzer at
+   * all, and the report must not present the second as the first. Stated by
+   * the engine so it cannot drift out of sync with what is registered.
+   */
+  analysedDimensions: Dimension[];
   /** Wall-clock analysis time, for the ops view. */
   durationMs: number;
   /** Non-fatal problems during analysis — unparseable files, tool crashes. */

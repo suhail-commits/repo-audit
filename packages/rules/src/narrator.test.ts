@@ -223,13 +223,7 @@ describe("score narration", () => {
       scores,
       findings: [],
       metrics: [],
-      architecture: {
-        verdict: "insufficient-evidence",
-        modularity: 0,
-        moduleCount: 0,
-        serviceCount: 0,
-        evidence: [],
-      },
+      analysedDimensions: ["authorship" as const, "health" as const],
       durationMs: 120,
       warnings: [],
     };

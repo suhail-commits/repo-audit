@@ -1,4 +1,5 @@
 import type {
+  Dimension,
   DimensionScore,
   Finding,
   Location,
@@ -10,6 +11,12 @@ import type {
 /** A finding rendered as prose for one persona. */
 export interface NarratedFinding {
   ruleId: string;
+  /**
+   * Carried through so the report can file the finding under the right section.
+   * The report is organised by dimension, and matching narrated findings back
+   * to the raw ones by index would break the moment sorting changed.
+   */
+  dimension: Dimension;
   severity: Severity;
   /** One line naming the problem. */
   title: string;
