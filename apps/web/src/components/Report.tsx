@@ -1,8 +1,4 @@
-import {
-  TemplateNarrator,
-  dimensionLabel,
-  notAnalysedHeadline,
-} from "@vibe/rules";
+import { TemplateNarrator, corpusComparison, dimensionLabel } from "@vibe/rules";
 import type { NarratedFinding, NarratedScore } from "@vibe/rules";
 import {
   DIMENSIONS,
@@ -14,6 +10,8 @@ import {
 } from "@vibe/shared";
 
 import { Hotspots } from "@/components/Hotspots";
+import { ModuleMap } from "@/components/ModuleMap";
+import { Priorities } from "@/components/Priorities";
 import { ScoreScale } from "@/components/ScoreScale";
 import { SignalBreakdown } from "@/components/SignalBreakdown";
 
@@ -54,35 +52,28 @@ export function Report({
   scanId,
   result,
   persona,
-  focus,
 }: {
   scanId: string;
   result: ScanResult;
   persona: Persona;
-  /** The question asked on the landing page. Decides which section leads. */
-  focus: Dimension;
 }) {
   const report = narrator.report(result, persona);
 
-  const sectionOf = (dimension: Dimension) => ({
+  /*
+   * All three sections, in the canonical order, always.
+   *
+   * The page used to render one — whichever the landing page's picker had been
+   * set to — with a switcher to reach the other two. That made a scan compute
+   * three answers and show one, and put the reader's most useful question
+   * ("anything bad in here?") behind a tab they had no reason to press. The
+   * scan was always doing the work; only the report was rationing it.
+   */
+  const sections = DIMENSIONS.map((dimension, i) => ({
     dimension,
-    // Numbering follows the canonical order, not the display order, so a
-    // section keeps the same number whichever question was asked.
-    index: DIMENSIONS.indexOf(dimension) + 1,
+    index: i + 1,
     findings: report.findings.filter((f) => f.dimension === dimension),
     narrated: report.scores.find((s) => s.dimension === dimension),
-  });
-
-  /*
-   * One section, the one that was asked for.
-   *
-   * The scan computes every dimension regardless — the indexes are shared, so
-   * skipping an analyzer would save almost nothing — but the page answers the
-   * question that was put to it and nothing else. The switcher below is what
-   * keeps the rest reachable: without it a scan would compute three answers and
-   * permanently show one, with re-scanning the only way to see the others.
-   */
-  const shown = sectionOf(focus);
+  }));
 
   return (
     <main>
@@ -96,9 +87,7 @@ export function Report({
             {PERSONAS.map((option) => (
               <a
                 key={option}
-                // Carry the focus through, or switching persona would silently
-                // send the reader back to the default section.
-                href={`/scan/${scanId}?persona=${option}&focus=${focus}`}
+                href={`/scan/${scanId}?persona=${option}`}
                 aria-current={option === persona}
               >
                 {PERSONA_LABELS[option]}
@@ -108,47 +97,71 @@ export function Report({
         </div>
       </div>
 
-      <nav className="focus-switch" aria-label="Which check to show">
-        {DIMENSIONS.map((option) => (
-          <a
-            key={option}
-            href={`/scan/${scanId}?persona=${persona}&focus=${option}`}
-            aria-current={option === focus}
-          >
-            {dimensionLabel(option, persona).title}
-            {result.analysedDimensions.includes(option) ? null : (
-              <span className="focus-switch-state"> · not analysed</span>
-            )}
-          </a>
-        ))}
-      </nav>
-
       {/*
-        The verdict counts findings across the whole report, so it belongs
-        here and not inside a section. Sitting in the authorship panel it read
-        as a promise about that section — "6 things are worth going through"
-        directly above a section containing none of them.
+        The verdict spans the whole report, so it belongs here and not inside a
+        section. Sitting in the authorship panel it read as a promise about that
+        section — "6 things are worth going through" directly above a section
+        containing none of them.
       */}
       <section className="verdict">
         {/*
-          The opening sentence follows the question that was asked. Leading with
-          the authorship verdict above a report that opens on Code health reads
-          as though the page ignored the choice.
+          The headline is the authorship one, which is the question the visitor
+          came with and the one the product is named after. It is not a verdict
+          on the whole report and must not be read as one — which is why the
+          shortlist sits directly beneath it, where a critical security finding
+          appears whatever the authorship number says.
         */}
-        {/*
-          The headline comes from the dimension on screen, never from a
-          fallback. Falling back to the report headline put "Authorship 14/100 —
-          unlikely to be AI-generated" at the top of the Security page: a
-          confident answer to a question nobody asked, and none to the one they
-          did.
-        */}
-        <h2>
-          {shown.narrated?.headline ?? notAnalysedHeadline(focus, persona)}
-        </h2>
+        <h2>{report.headline}</h2>
         <p>{report.summary}</p>
+        {/*
+          Composed in the narrator from counted values only, and until now
+          rendered nowhere but the CLI. It is the sentence that says whether any
+          of this needs acting on, which is the one thing a score cannot say.
+        */}
+        <p className="verdict-take">{report.verdict}</p>
       </section>
 
-      <DimensionSection {...shown} persona={persona} result={result} />
+      <RepoFacts result={result} />
+
+      {/*
+        Above the sections, because it is the only thing on the page that spans
+        them. Everything below answers "what did you find in this area?"; this
+        answers "of everything, what first?".
+      */}
+      <Priorities
+        persona={persona}
+        priorities={report.priorities}
+        totalActionable={
+          report.findings.filter((f) => f.severity !== "info").length
+        }
+      />
+
+      {sections.map((section) => (
+        <DimensionSection
+          key={section.dimension}
+          {...section}
+          persona={persona}
+          result={result}
+        />
+      ))}
+
+      {/*
+        Below the section, above the warnings: it describes the whole
+        repository rather than the question on screen, so it does not belong
+        inside a dimension — but it is context for what was just read, not a
+        preamble to it.
+      */}
+      {result.moduleGraph ? (
+        <section className="dimension">
+          <div className="section-head">
+            <h3>How this codebase is put together</h3>
+            <span className="meta">
+              {result.moduleGraph.nodes.length} directories
+            </span>
+          </div>
+          <ModuleMap graph={result.moduleGraph} />
+        </section>
+      ) : null}
 
       {result.warnings.length > 0 ? (
         <div className="warnings">
@@ -161,9 +174,14 @@ export function Report({
         </div>
       ) : null}
 
+      {/*
+        The file count moved into the facts strip at the top, so repeating it
+        here left the footer saying nothing the reader had not already read
+        twice. What only the footer can say is that we never ran any of it.
+      */}
       <p className="meta report-foot">
-        Analysed {result.repo.sourceFileCount} source files in {result.durationMs}
-        ms. No code was executed.
+        Analysed in {result.durationMs}ms. No code from this repository was
+        executed &mdash; every file was read and parsed, never run.
       </p>
     </main>
   );
@@ -235,6 +253,16 @@ function DimensionSection({
             measured={score.signals.filter((s) => s.available).length}
             total={score.signals.length}
           />
+
+          {/*
+            The reference frame. The band words say what *we* call a score; this
+            says what hand-written code actually scores, which is the question a
+            reader looking at "21" is really asking. Measured by the sweep on
+            every run and, until now, thrown away.
+          */}
+          <p className="corpus">
+            {corpusComparison(dimension, score.score, persona)}
+          </p>
         </div>
       ) : null}
 
@@ -245,12 +273,6 @@ function DimensionSection({
           ))}
         </ul>
       ) : null}
-
-      {/*
-        After the evidence and before the findings: it answers "where", which
-        only makes sense once the reader knows what was found.
-      */}
-      {score ? <Hotspots score={score} persona={persona} /> : null}
 
       {narrated?.caveats.map((caveat, i) => (
         <p className="caveat" key={i}>
@@ -285,25 +307,84 @@ function DimensionSection({
         </p>
       ) : null}
 
-      {metrics.length > 0 && dimension !== "security" ? (
-        <Metrics metrics={metrics} />
-      ) : null}
-
       {/*
-        Collapsed by default, but the summary has to advertise what is inside:
-        the bars summing to the score are this tool's strongest argument that it
-        is measuring rather than guessing.
+        One toggle per section, holding everything that supports the answer
+        rather than being it: where it concentrates, the raw counts, and the
+        per-check arithmetic.
+
+        These used to sit open, and three sections' worth stacked on one page
+        made the report mostly furniture — the two directory rankings in
+        particular came out nearly identical, because health borrows the same
+        per-file data authorship measured, so the same six folders were printed
+        twice in a slightly different order.
+
+        The summary has to advertise what is inside: the bars summing to the
+        score are this tool's strongest argument that it measures rather than
+        guesses, and a toggle nobody opens hides exactly that.
       */}
       {score ? (
         <details className="breakdown-details">
           <summary>
             How we worked this out
-            <span className="meta"> — every check, and what it contributed</span>
+            <span className="meta">
+              {" "}
+              — every check, what it contributed, and where it concentrates
+            </span>
           </summary>
+
           <SignalBreakdown score={score} persona={persona} />
+          <Hotspots score={score} persona={persona} />
+          {metrics.length > 0 ? <Metrics metrics={metrics} /> : null}
         </details>
       ) : null}
     </section>
+  );
+}
+
+/**
+ * What was actually looked at, stated as facts rather than buried in prose.
+ *
+ * **The revision is the point of this.** Everything else here is a restatement
+ * of the summary sentence, but nothing on the page said *which version* of the
+ * repository the numbers describe — and that is not a nicety: the same project
+ * scanned locally and through the GitHub API reported 11,436 and 7,519 lines on
+ * the same afternoon, because one had unpushed commits. A reader comparing the
+ * report to their editor had no way to account for the difference.
+ */
+function RepoFacts({ result }: { result: ScanResult }) {
+  const { repo } = result;
+  const languages = repo.languages
+    .filter((l) => l.share >= 0.05)
+    .map((l) => l.label);
+
+  const facts: { label: string; value: string }[] = [
+    { label: "Source files", value: repo.sourceFileCount.toLocaleString() },
+    { label: "Lines of code", value: repo.totalLoc.toLocaleString() },
+  ];
+
+  if (languages.length > 0) {
+    facts.push({ label: "Languages", value: languages.slice(0, 3).join(", ") });
+  }
+  if (repo.frameworks.length > 0) {
+    facts.push({ label: "Stack", value: repo.frameworks.slice(0, 3).join(", ") });
+  }
+  if (repo.headSha) {
+    // Short form, as every git tool shows it. The full sha is in the title
+    // attribute for anyone who needs to paste it.
+    facts.push({ label: "Revision", value: repo.headSha.slice(0, 7) });
+  }
+
+  return (
+    <dl className="repo-facts">
+      {facts.map((fact) => (
+        <div key={fact.label}>
+          <dt>{fact.label}</dt>
+          <dd title={fact.label === "Revision" ? repo.headSha : undefined}>
+            {fact.value}
+          </dd>
+        </div>
+      ))}
+    </dl>
   );
 }
 

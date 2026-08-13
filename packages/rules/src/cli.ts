@@ -1,8 +1,10 @@
 import path from "node:path";
 
 import { scanRepository } from "@vibe/engine";
-import { PERSONAS, type Persona } from "@vibe/shared";
+import { PERSONAS, type Dimension, type Persona } from "@vibe/shared";
 
+import { corpusComparison } from "./corpus";
+import { prioritiesCaveat, prioritiesTitle } from "./dimension-labels";
 import { TemplateNarrator } from "./narrator";
 
 /**
@@ -41,11 +43,43 @@ async function main(): Promise<void> {
   console.log(`  ${report.headline}`);
   console.log(`${rule}\n`);
   console.log(wrap(report.summary));
+  console.log(`\n${wrap(report.verdict)}`);
 
   for (const score of report.scores) {
     console.log(`\n  ${score.dimension.toUpperCase()} — ${score.score}/100`);
+    // Where the number sits against known hand-written code. The band words
+    // say what we call a score; this says what one normally looks like.
+    console.log(
+      wrap(
+        corpusComparison(score.dimension as Dimension, score.score, persona),
+        "    ~ ",
+      ),
+    );
     for (const line of score.evidence) console.log(wrap(line, "    • "));
     for (const caveat of score.caveats) console.log(wrap(caveat, "    ! "));
+  }
+
+  /*
+   * The shortlist, before the full list. Same reason the web report puts it
+   * above the sections: "what first?" is a different question from "what did
+   * you find in this area?", and only the CLI printed the second one.
+   */
+  if (report.priorities.length > 0) {
+    const actionable = report.findings.filter(
+      (f) => f.severity !== "info",
+    ).length;
+    console.log(`\n${rule}`);
+    console.log(`  ${prioritiesTitle(persona).toUpperCase()}`);
+    console.log(
+      `  ${prioritiesCaveat(report.priorities.length, actionable, persona)}`,
+    );
+    console.log(`${rule}`);
+    report.priorities.forEach((finding, i) => {
+      console.log(
+        `  ${i + 1}. [${finding.severity.toUpperCase()}] ${finding.title}` +
+          `  (${finding.dimension})`,
+      );
+    });
   }
 
   if (report.findings.length > 0) {

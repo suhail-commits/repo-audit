@@ -2,6 +2,7 @@ import type { Signal } from "@vibe/shared";
 
 import { collect, memberPath, walk, type AstNode, type ParsedFile } from "../../index/ast";
 import { ramp, type AnalysisContext } from "../context";
+import { countOf } from "../../format";
 
 /**
  * Convention drift between files.
@@ -218,7 +219,7 @@ export function conventionDriftSignal(ctx: AnalysisContext): Signal {
       label: dimension.label,
       minority: minorityRatio,
       detail: `${dimension.label}: ${sorted
-        .map(([choice, n]) => `${choice} in ${n} file(s)`)
+        .map(([choice, n]) => `${choice} in ${countOf(n, "file")}`)
         .join(", ")}`,
     });
   }

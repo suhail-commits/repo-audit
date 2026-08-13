@@ -240,6 +240,19 @@ export interface RepoInfo {
   languages: LanguageShare[];
   /** The tier the bulk of this repository could be analyzed at. */
   analysisTier: AnalysisTier;
+
+  /**
+   * The exact revision analysed, when the history source names one.
+   *
+   * A report with no revision on it is a claim about "the repository", which is
+   * a moving target. The same repo scanned from a local checkout and through
+   * the GitHub API legitimately produced 11,436 and 7,519 lines on the same
+   * afternoon — one had unpushed work — and nothing on the page explained why.
+   *
+   * Optional because a zip upload has no commits to take it from, and because
+   * scans stored before this existed do not carry it.
+   */
+  headSha?: string;
 }
 
 export interface ScanResult {
@@ -257,8 +270,43 @@ export interface ScanResult {
    * the engine so it cannot drift out of sync with what is registered.
    */
   analysedDimensions: Dimension[];
+
+  /**
+   * How the codebase is put together, aggregated to directories.
+   *
+   * Absent — never an empty graph — when there is nothing honest to draw:
+   * `ImportGraph` resolves JS/TS only, so a Python repository has no edges at
+   * all and would render as boxes with no lines between them, a confident
+   * picture of a codebase where nothing imports anything.
+   *
+   * Optional for the same reason `DimensionScore.hotspots` is: `ScanResult` is
+   * persisted as jsonb and read back, so a required field would be a claim
+   * about rows that predate it.
+   */
+  moduleGraph?: ModuleGraph;
+
   /** Wall-clock analysis time, for the ops view. */
   durationMs: number;
   /** Non-fatal problems during analysis — unparseable files, tool crashes. */
   warnings: string[];
+}
+
+/** One directory in the module map, and how much code it holds. */
+export interface ModuleGraphNode {
+  path: string;
+  files: number;
+}
+
+/** `count` is how many individual imports the directory-level edge stands for. */
+export interface ModuleGraphEdge {
+  from: string;
+  to: string;
+  count: number;
+}
+
+export interface ModuleGraph {
+  nodes: ModuleGraphNode[];
+  edges: ModuleGraphEdge[];
+  /** Directories left off the diagram by the node cap. Stated, never silent. */
+  omitted: number;
 }

@@ -4,6 +4,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { normalizePath } from "../ingest/guards";
+import { countOf } from "../format";
 
 const run = promisify(execFile);
 
@@ -95,7 +96,7 @@ export class GitIndex {
 
     if (commits.length < 3) {
       index.warnings.push(
-        `only ${commits.length} commit(s) — history-based signals are weak`,
+        `only ${countOf(commits.length, "commit")} — history-based signals are weak`,
       );
     }
     if (options.truncated) {

@@ -1,6 +1,7 @@
 import type { Signal } from "@vibe/shared";
 
 import { clamp01, ramp, unavailable, type AnalysisContext } from "../context";
+import { countOf } from "../../format";
 
 /**
  * Distributional properties of the commit history.
@@ -137,7 +138,7 @@ export function buildVelocitySignal(ctx: AnalysisContext): Signal {
     return unavailable(
       id,
       WEIGHTS.buildVelocity,
-      `only ${activeDays} active day(s) of commits — a rate needs a longer span`,
+      `only ${countOf(activeDays, "active day")} of commits — a rate needs a longer span`,
     );
   }
 
@@ -172,7 +173,7 @@ export function buildVelocitySignal(ctx: AnalysisContext): Signal {
     weight: WEIGHTS.buildVelocity,
     available: true,
     evidence: [
-      `${linesAdded.toLocaleString()} lines added across ${activeDays} day(s) of commits`,
+      `${linesAdded.toLocaleString()} lines added across ${countOf(activeDays, "day")} of commits`,
       `Roughly ${Math.round(perAuthorPerDay).toLocaleString()} lines per author per active day`,
       authors === 1
         ? "Single contributor across the entire history"
@@ -232,7 +233,7 @@ function historyGap(ctx: AnalysisContext): string | null {
     return ctx.git.unavailableReason ?? "git history unavailable";
   }
   if (ctx.git.commitCount < MIN_COMMITS) {
-    return `only ${ctx.git.commitCount} commit(s) in history`;
+    return `only ${countOf(ctx.git.commitCount, "commit")} in history`;
   }
   return null;
 }

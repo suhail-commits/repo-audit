@@ -11,6 +11,7 @@ import {
   isTestFile,
 } from "../ingest/guards";
 import { walkRepo, type WalkedFile } from "../ingest/walk";
+import { countOf } from "../format";
 
 export interface IndexedFile {
   relPath: string;
@@ -68,7 +69,7 @@ export class FileIndex {
     const index = new FileIndex(files, walk.truncated, walk.oversized);
     if (skipped.length > 0) {
       index.warnings.push(
-        `${skipped.length} file(s) skipped as binary or unreadable`,
+        `${countOf(skipped.length, "file")} skipped as binary or unreadable`,
       );
     }
     if (walk.truncated) {

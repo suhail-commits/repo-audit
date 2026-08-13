@@ -193,6 +193,35 @@ export async function listExamples(limit = 4): Promise<ScanRecord[]> {
   return rows.map(toRecord);
 }
 
+/**
+ * The most recent finished scan of one repository.
+ *
+ * Only rows that actually produced a result: a failed scan is a record of an
+ * attempt, and a badge rendered from one would put a number on a repository we
+ * never managed to read.
+ */
+export async function latestScanFor(slug: string): Promise<ScanRecord | null> {
+  const db = sql();
+  if (!db) {
+    warnMemory();
+    return (
+      [...memory.values()]
+        .filter((r) => r.slug === slug && r.result !== null)
+        .sort((a, b) => b.createdAt - a.createdAt)[0] ?? null
+    );
+  }
+
+  await ensureSchema(db);
+  const rows = (await db.query(
+    `SELECT * FROM scans WHERE slug = $1 AND result IS NOT NULL
+     ORDER BY created_at DESC LIMIT 1`,
+    [slug],
+  )) as Record<string, unknown>[];
+
+  const row = rows[0];
+  return row ? toRecord(row) : null;
+}
+
 function toRecord(row: Record<string, unknown>): ScanRecord {
   const result = row["result"];
   return {

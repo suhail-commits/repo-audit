@@ -124,11 +124,21 @@ export const SUPPORTING_EXTENSIONS = new Set([
   ".sh",
   ".graphql",
   ".gql",
+  // Key material. Read so a committed private key can be found — without these
+  // the file is never indexed and the secret scanner cannot see what it exists
+  // to look for.
+  ".pem",
+  ".key",
 ]);
 
 /** Exact filenames worth reading regardless of extension. */
 export const SUPPORTING_FILENAMES = new Set([
   "dockerfile",
+  // SSH private keys carry no extension at all.
+  "id_rsa",
+  "id_dsa",
+  "id_ecdsa",
+  "id_ed25519",
   "docker-compose.yml",
   "docker-compose.yaml",
   "compose.yml",
@@ -152,7 +162,26 @@ export const LOCKFILES = new Set([
   "yarn.lock",
   "bun.lockb",
   "bun.lock",
+  // Non-npm ecosystems, added so the dependency-vulnerability check can read
+  // them. Listed here rather than as source because none of them is authored
+  // code, which is exactly what `isLockfile` is asked elsewhere.
+  "poetry.lock",
+  "cargo.lock",
+  "go.mod",
+  "go.sum",
+  "gemfile.lock",
+  "composer.lock",
 ]);
+
+/**
+ * Python's pinned-dependency convention, which has no single filename.
+ * `requirements.txt`, `requirements-dev.txt`, `requirements/base.txt`.
+ */
+const REQUIREMENTS_RE = /(^|[/\\])requirements[^/\\]*\.txt$/i;
+
+export function isRequirementsFile(relPath: string): boolean {
+  return REQUIREMENTS_RE.test(relPath);
+}
 
 const GENERATED_PATH_PATTERNS = [
   /\.min\.(js|css)$/i,
@@ -229,6 +258,33 @@ export function isLockfile(relPath: string): boolean {
   return LOCKFILES.has(basenameOf(relPath));
 }
 
+/** Names a licence file carries. `LICENSE-MIT` and `LICENCE` both count. */
+const LICENSE_NAME = /^(?:un)?licen[cs]e(?:[-._].*)?$|^copying(?:[-._].*)?$|^notice(?:[-._].*)?$/;
+
+/**
+ * Extensions a licence is written with. The empty string is the common case.
+ *
+ * Constrained deliberately: without it a source file called `license.ts` — a
+ * licence *checker*, say — would be picked up as the project's licence.
+ */
+const LICENSE_EXTENSIONS = new Set(["", ".md", ".txt", ".rst"]);
+
+/**
+ * A licence file, which until now was never indexed at all.
+ *
+ * `LICENSE` has no extension and was in no filename list, so `isRelevantFile`
+ * rejected it and the file never reached `FileIndex`. **Exactly the shape of the
+ * `deploy/id_rsa` bug**: the one file a check most exists to read was invisible
+ * to it, and nothing failed — the check simply found nothing, which is
+ * indistinguishable from a repository with nothing to find.
+ */
+export function isLicenseFile(relPath: string): boolean {
+  const base = basenameOf(relPath);
+  const ext = extensionOf(relPath);
+  const stem = ext === "" ? base : base.slice(0, -ext.length);
+  return LICENSE_EXTENSIONS.has(ext) && LICENSE_NAME.test(stem);
+}
+
 export function isTestFile(relPath: string): boolean {
   return TEST_PATH_PATTERNS.some((p) => p.test(relPath));
 }
@@ -242,6 +298,8 @@ export function isRelevantFile(relPath: string): boolean {
   if (isIgnoredPath(relPath)) return false;
   if (isCodeFile(relPath)) return true;
   if (isLockfile(relPath)) return true;
+  if (isRequirementsFile(relPath)) return true;
+  if (isLicenseFile(relPath)) return true;
   const base = basenameOf(relPath);
   if (SUPPORTING_FILENAMES.has(base)) return true;
   if (base.startsWith(".env")) return true;

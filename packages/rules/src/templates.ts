@@ -1,8 +1,31 @@
 import type { Finding } from "@vibe/shared";
 
-import { arr, countOf, duration, list, num, str } from "./format";
+import { arr, countOf, duration, list, namesClause, num, str } from "./format";
 
 type Data = Finding["data"];
+
+/**
+ * What each dangerous-call kind actually is, in the owner's register.
+ *
+ * Keyed by the `kind` the engine reports rather than folded into one sentence,
+ * because these are not variations on a theme: an injection sink builds
+ * something out of runtime values, while wildcard CORS builds nothing and is a
+ * configuration decision. One shared description was wrong for half of them.
+ */
+const SINK_EXPLANATION: Record<string, string> = {
+  eval:
+    "This runs code that is put together while the app is running. If any part of that text comes from a user, they decide what the app does.",
+  "dynamic-function":
+    "This builds a new function out of text while the app is running. If any of that text comes from a user, they choose what it does.",
+  "shell-injection":
+    "This builds a command for the operating system by pasting values into it. A value containing the right characters can run a second command of its own.",
+  "sql-injection":
+    "This builds a database query by pasting values into the text of it. That is the classic route to reading or deleting data the caller should not reach.",
+  "raw-html":
+    "This puts HTML built at runtime straight onto the page, skipping the protection that normally stops a visitor's text being treated as code.",
+  "cors-wildcard":
+    "This lets any website make requests to your app from a visitor's browser. If your app trusts the browser's session, another site can act on that visitor's behalf.",
+};
 
 export interface PersonaTemplate {
   body(data: Data, finding: Finding): string;
@@ -94,16 +117,22 @@ export const RULE_TEMPLATES: Record<string, RuleTemplate> = {
       `${num(d, "copies")} near-identical copies of the same function`,
     founder: {
       body: (d) =>
-        `The same logic has been written ${num(d, "copies")} separate times, under different names ` +
-        `(${list(arr(d, "names"))}). Each copy does the same thing.`,
+        `The same logic has been written ${num(d, "copies")} separate times` +
+        `${namesClause(arr(d, "names"))}. Each copy does the same thing.`,
       detail: () => [
         "When one copy needs a fix, the others are easy to miss — so a bug you thought was fixed can keep happening.",
       ],
     },
     engineer: {
-      body: (d) =>
-        `Type-2 clones (identical structure, differing identifiers): ${list(arr(d, "names"))} ` +
-        `across ${countOf(arr(d, "files").length, "file")}.`,
+      body: (d) => {
+        // Anonymous copies have no names to print, so the sentence has to be
+        // able to stand without them rather than rendering "<anonymous>".
+        const names = arr(d, "names").filter((n) => !n.startsWith("<"));
+        const where = `across ${countOf(arr(d, "files").length, "file")}`;
+        return names.length > 0
+          ? `Type-2 clones (identical structure, differing identifiers): ${list(names)} ${where}.`
+          : `Type-2 clones (identical structure, differing identifiers), ${where}. The copies are anonymous functions.`;
+      },
       detail: (d) => [`Extract a shared implementation in ${arr(d, "files")[0] ?? "a shared module"}.`],
     },
     acquirer: {
@@ -169,6 +198,293 @@ export const RULE_TEMPLATES: Record<string, RuleTemplate> = {
         `${countOf(num(d, "count"), "dependency", "dependencies")} declared but unused — ` +
         `expands the vulnerability surface with no corresponding functionality.`,
       detail: () => [`Cleanup effort: ${duration(10)}.`],
+    },
+  },
+
+  /*
+   * The credential itself never appears in any of these sentences — only what
+   * kind it is and where. A report that prints the key it found is worse than
+   * one that never looked, and the report is the part that gets shared.
+   */
+  "hardcoded-secret": {
+    title: (d) => `${str(d, "credential")} committed to the repository`,
+    founder: {
+      /*
+       * Phrased so the credential name never needs an article in front of it.
+       * "A ${label}" produced "A aws access key id" — wrong article, and
+       * lowercasing mangled every initialism in the list. Choosing between "a"
+       * and "an" from the first letter gets `npm` wrong too, so the sentence
+       * avoids the problem instead of solving it.
+       */
+      body: (d) =>
+        `Your code has a credential written straight into it — ${str(d, "credential")}, in ` +
+        `${countOf(num(d, "occurrences"), "place")}. Anyone who can see this repository can use it.`,
+      detail: (_d, f) => [
+        "Treat it as already leaked: rotate the credential first, then remove it from the code. Deleting it from the current files does not remove it from the project's history.",
+        ...(f.locations.length > 0
+          ? [`Found in ${list(f.locations.map((l) => l.file))}.`]
+          : []),
+      ],
+    },
+    engineer: {
+      body: (d) =>
+        `${str(d, "credential")} matched by vendor prefix in ` +
+        `${countOf(num(d, "occurrences"), "location")}.`,
+      detail: () => [
+        "Rotate before removing — the value stays reachable in git history after the file changes.",
+      ],
+    },
+    acquirer: {
+      body: (d) =>
+        `Live credential material committed to source: ${str(d, "credential")}, ` +
+        `${countOf(num(d, "occurrences"), "occurrence")}.`,
+      detail: () => [
+        `Rotation and history rewrite: ${duration(60)}. Remediation is cheap; the exposure window is the diligence question.`,
+      ],
+    },
+  },
+
+  "committed-env-file": {
+    title: (d) =>
+      `${countOf(arr(d, "files").length, "environment file")} committed to the repository`,
+    founder: {
+      body: (d) =>
+        `${list(arr(d, "files"))} is in the repository, and it holds real settings rather than blank examples. ` +
+        `Environment files are where projects keep passwords and connection strings.`,
+      detail: () => [
+        "Add it to .gitignore, rotate anything inside it, and commit a .env.example with the names but no values.",
+      ],
+    },
+    engineer: {
+      body: (d) =>
+        `Tracked and carrying non-placeholder values: ${list(arr(d, "files"))}.`,
+      detail: () => [
+        "git rm --cached, add to .gitignore, rotate the values. The file stays in history until it is rewritten.",
+      ],
+    },
+    acquirer: {
+      body: (d) =>
+        `Environment configuration committed to source control: ${list(arr(d, "files"))}. ` +
+        `Any credentials it carries should be considered exposed.`,
+      detail: () => [`Rotation and cleanup: ${duration(45)}.`],
+    },
+  },
+
+  /*
+   * Licensing lives in Security because it is the same kind of question — what
+   * this repository exposes that its owner may not have noticed. The prose has
+   * to stay descriptive: we can read what the files say, and we are not
+   * qualified to tell anyone what it means for them legally.
+   */
+  "missing-license": {
+    title: () => "No licence file",
+    founder: {
+      body: () =>
+        "There is no LICENSE file here. Without one, the default in most countries is that nobody else " +
+        "may copy, change or reuse your code — even though it is public.",
+      detail: () => [
+        "If you want people to use it, add a licence. If you do not, this is already the right answer.",
+      ],
+    },
+    engineer: {
+      body: () =>
+        "No LICENSE, COPYING or NOTICE file at any level. Absent an explicit grant, all rights are reserved by default.",
+      detail: () => [
+        "choosealicense.com covers the common options; the file belongs at the repository root.",
+      ],
+    },
+    acquirer: {
+      body: () =>
+        "The repository states no licence. Rights are therefore reserved by default, and the terms under which " +
+        "any contributor's work was granted are undocumented.",
+      detail: () => [
+        `Confirm IP assignment separately — this check reads files, not agreements. Adding a licence: ${duration(10)}.`,
+      ],
+    },
+  },
+
+  "license-mismatch": {
+    title: (d) =>
+      `Licence file says ${str(d, "identified")}, manifest says ${str(d, "declared")}`,
+    founder: {
+      body: (d) =>
+        `Your ${str(d, "declaredIn")} says this project is ${str(d, "declared")}, but the text in ` +
+        `${str(d, "licenseFile")} is actually ${str(d, "identified")}. Those are different sets of rules, ` +
+        "and anyone using your code cannot tell which one applies.",
+      detail: () => [
+        "Pick the one you meant and make both files say it.",
+      ],
+    },
+    engineer: {
+      body: (d) =>
+        `\`${str(d, "declaredIn")}\` declares \`${str(d, "declared")}\`; \`${str(d, "licenseFile")}\` ` +
+        `contains the text of ${str(d, "identified")}.`,
+      detail: () => [
+        "Package registries and licence scanners read the manifest; humans and courts read the file.",
+      ],
+    },
+    acquirer: {
+      body: (d) =>
+        `Contradictory licensing: the manifest declares ${str(d, "declared")} while the licence file is ` +
+        `${str(d, "identified")}. Which terms govern is unresolved on the face of the repository.`,
+      detail: (d) => [
+        ...(/^A?GPL|^MPL/i.test(str(d, "identified"))
+          ? [
+              `The file names a copyleft licence, which is the more restrictive of the two readings.`,
+            ]
+          : []),
+        `Resolving the contradiction: ${duration(30)}. Legal review is a separate matter.`,
+      ],
+    },
+  },
+
+  "unauthenticated-route": {
+    title: (d) =>
+      num(d, "open") === 1
+        ? "1 route that changes data does not check the caller"
+        : `${num(d, "open")} routes that change data do not check the caller`,
+    founder: {
+      body: (d) =>
+        (num(d, "open") === 1
+          ? "One address in your app can change or delete data, and we could not find anything in it that checks who is asking. "
+          : `${num(d, "open")} addresses in your app can change or delete data, and we could not find anything in them that checks who is asking. `) +
+        (num(d, "judged") === 1
+          ? "It was the only such address in the project."
+          : `We looked at ${num(d, "judged")} such addresses in total.`),
+      detail: (d) => [
+        ...(d["middlewarePresent"]
+          ? [
+              "A shared gatekeeper file exists that we could not read through, so some of these may already be protected. Worth checking rather than assuming either way.",
+            ]
+          : []),
+        `Affected: ${list(arr(d, "routes"), 6)}.`,
+      ],
+    },
+    engineer: {
+      body: (d) =>
+        `${num(d, "open")}/${num(d, "judged")} mutating routes have no auth call, session read, or 401/403 path ` +
+        `in the handler body: ${list(arr(d, "routes"), 6)}.`,
+      detail: (d) => [
+        ...(d["middlewarePresent"]
+          ? [
+              "Middleware present but its coverage could not be resolved statically — severity reduced accordingly.",
+            ]
+          : []),
+        ...(num(d, "unresolved") > 0
+          ? [
+              `${num(d, "unresolved")} further mutating route(s) had unresolvable handlers and were not judged.`,
+            ]
+          : []),
+      ],
+    },
+    acquirer: {
+      body: (d) =>
+        `${num(d, "open")} of ${num(d, "judged")} state-changing endpoints show no access control at the handler. ` +
+        `Read-only endpoints were excluded, so these are writes and deletes.`,
+      detail: (d) => [
+        d["middlewarePresent"]
+          ? "Unverified: a middleware layer exists that static analysis could not follow. Confirm during technical diligence."
+          : `Remediation: ${duration(num(d, "open") * 20)}.`,
+      ],
+    },
+  },
+
+  "dangerous-call": {
+    title: (_d, f) => f.title,
+    founder: {
+      /*
+       * The explanation is chosen by kind, not shared. A single sentence about
+       * "values decided while the app is running" is accurate for the
+       * injection sinks and simply false for CORS, which is a configuration
+       * choice and builds nothing — it printed "CORS allows any origin. This
+       * is code that builds a command, query, or page fragment…" directly
+       * beneath its own title.
+       */
+      body: (d) =>
+        SINK_EXPLANATION[str(d, "kind")] ??
+        "This code does something at runtime that can be influenced from outside the app.",
+      detail: (d) => [
+        ...(num(d, "inAppCode") === 0
+          ? [
+              "This is only in build tooling rather than in the app itself, so it is far less serious — worth knowing about rather than fixing today.",
+            ]
+          : num(d, "inBuildTooling") > 0
+            ? [
+                `${num(d, "inAppCode")} of these are in the app itself; the rest are in build scripts, which matter much less.`,
+              ]
+            : []),
+      ],
+    },
+    engineer: {
+      body: (d, f) =>
+        `${f.title} — ${num(d, "inAppCode")} in application code, ` +
+        `${num(d, "inBuildTooling")} in build tooling or config.`,
+      detail: () => [
+        "Only interpolated or concatenated arguments are reported; fully literal calls are excluded.",
+      ],
+    },
+    acquirer: {
+      body: (d, f) =>
+        `${f.title}. ${num(d, "inAppCode")} occurrence(s) sit in code that serves requests.`,
+      detail: (d) => [
+        num(d, "inAppCode") > 0
+          ? `Review effort: ${duration(num(d, "inAppCode") * 20)}.`
+          : "Confined to build tooling — not attacker-reachable in production.",
+      ],
+    },
+  },
+
+  "vulnerable-dependency": {
+    title: (d) =>
+      `${countOf(num(d, "count"), "shipped dependency", "shipped dependencies")} with known vulnerabilities`,
+    founder: {
+      body: (d) =>
+        `${countOf(num(d, "count"), "package")} that ship with your app have publicly known security problems, ` +
+        `out of ${num(d, "checked")} installed packages we checked.`,
+      detail: (d) => [
+        `Affected: ${list(arr(d, "packages"), 6)}.`,
+        "Most are fixed by upgrading. The identifiers above can be looked up for the details.",
+      ],
+    },
+    engineer: {
+      body: (d) =>
+        `${num(d, "count")}/${num(d, "checked")} installed packages match OSV advisories: ` +
+        `${list(arr(d, "packages"), 8)}.`,
+      detail: (d) =>
+        num(d, "undetailed") > 0
+          ? [
+              `${num(d, "undetailed")} further advisories were matched but not described — detail lookup is capped per scan.`,
+            ]
+          : [],
+    },
+    acquirer: {
+      body: (d) =>
+        `${num(d, "count")} of ${num(d, "checked")} production dependencies carry published advisories. ` +
+        `Development-only tooling is reported separately and excluded here.`,
+      detail: () => [
+        `Typical remediation is a dependency upgrade pass: ${duration(120)}.`,
+      ],
+    },
+  },
+
+  "vulnerable-dev-dependency": {
+    title: (d) =>
+      `${countOf(num(d, "count"), "development dependency", "development dependencies")} with known vulnerabilities`,
+    founder: {
+      body: (d) =>
+        `${countOf(num(d, "count"), "package")} used only while building and testing have known problems. ` +
+        `These do not ship to your users.`,
+      detail: () => [
+        "Lower priority than the shipped ones, but worth clearing when you next upgrade.",
+      ],
+    },
+    engineer: {
+      body: (d) =>
+        `Dev-only, not attacker-reachable in production: ${list(arr(d, "packages"), 6)}.`,
+    },
+    acquirer: {
+      body: (d) =>
+        `${num(d, "count")} build-time dependencies carry advisories. Not part of the deployed surface.`,
     },
   },
 };

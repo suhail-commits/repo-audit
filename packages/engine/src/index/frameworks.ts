@@ -114,6 +114,20 @@ export function detectFrameworks(files: FileIndex): FrameworkInfo {
 export function unusedDependencies(
   info: FrameworkInfo,
   importedPackages: Set<string>,
+  /**
+   * Packages named in a string literal somewhere in the source.
+   *
+   * Not every use of a package is an import. A specifier assembled at runtime —
+   * `["tree-sitter-wasms", "out", name].join("/")` — resolves a real dependency
+   * and produces no import record, and this repository does exactly that,
+   * deliberately, because handing Turbopack a literal makes it try to bundle a
+   * `.wasm`. So the tool reported its own documented workaround as an unused
+   * dependency.
+   *
+   * The same shape covers plugin names in config, `require.resolve` on a data
+   * file, and anything loaded through a registry of strings.
+   */
+  mentionedPackages: Set<string> = new Set(),
 ): string[] {
   // Packages that legitimately never appear in an import statement: toolchain
   // entries invoked via CLI, and runtime deps the framework wires up itself.
@@ -153,5 +167,6 @@ export function unusedDependencies(
     .filter((name) => !name.startsWith("eslint-"))
     .filter((name) => !name.startsWith("@tailwindcss/"))
     .filter((name) => !importedPackages.has(name))
+    .filter((name) => !mentionedPackages.has(name))
     .sort();
 }

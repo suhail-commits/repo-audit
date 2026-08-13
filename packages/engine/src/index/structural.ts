@@ -6,6 +6,7 @@ import { isStructuralFile } from "../ingest/guards";
 import { LineMap } from "./ast";
 import type { FileIndex } from "./files";
 import { languageOf, type Language } from "./language";
+import { countOf } from "../format";
 
 /**
  * Structural analysis via tree-sitter, for the languages oxc cannot parse.
@@ -208,7 +209,7 @@ export class StructuralIndex {
         }
 
         if (failed > 0) {
-          index.warnings.push(`${failed} ${language} file(s) could not be parsed`);
+          index.warnings.push(`${countOf(failed, `${language} file`)} could not be parsed`);
         }
       }),
     );

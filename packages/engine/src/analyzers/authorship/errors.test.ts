@@ -87,7 +87,7 @@ describe("swallowed errors", () => {
     );
     expect(signal.value).toBe(0);
     expect(signal.evidence.join(" ")).toMatch(
-      /8 empty handler\(s\) carry an explanatory comment/,
+      /8 empty handlers carry an explanatory comment/,
     );
   });
 

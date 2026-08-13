@@ -8,6 +8,7 @@ import {
   commitSizeSignal,
   writeOnceFilesSignal,
 } from "./commit-shape";
+import { refactorRatioSignal } from "./rework";
 import {
   analyzeClones,
   cloneFindings,
@@ -74,6 +75,7 @@ export function analyzeAuthorship(
     commitMessageSignal(ctx),
     buildVelocitySignal(ctx),
     writeOnceFilesSignal(ctx),
+    refactorRatioSignal(ctx),
     // Structure — these are the signals that survive a zip with no git history.
     cloneSignal(ctx, clones),
     conventionDriftSignal(ctx),

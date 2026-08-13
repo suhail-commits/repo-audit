@@ -155,6 +155,102 @@ const LABELS: Record<string, LabelEntry> = {
     },
     technical: { label: "test-coverage" },
   },
+  "hardcoded-secrets": {
+    plain: {
+      label: "Passwords and keys in the code",
+      explains:
+        "Credentials written straight into files, recognised by the prefix their provider assigns. Fires on the first one found rather than counting.",
+    },
+    technical: {
+      label: "hardcoded-secrets",
+      explains:
+        "Vendor-prefix matching over file content. Presence-shaped: one match saturates the signal. Tests, generated output and Markdown are excluded.",
+    },
+  },
+  "committed-env": {
+    plain: {
+      label: "Environment file committed",
+      explains:
+        "A .env holding real settings rather than blank examples, checked in rather than ignored.",
+    },
+    technical: {
+      label: "committed-env",
+      explains:
+        "A tracked .env with non-placeholder values on credential-shaped keys. Files covered by .gitignore are excluded.",
+    },
+  },
+  "refactor-ratio": {
+    plain: {
+      label: "Code goes in but never comes out",
+      explains:
+        "Whether this project ever removes code as well as adding it. Projects written by hand delete about a third to a half of what they change; generated ones tend only to accumulate.",
+    },
+    technical: {
+      label: "refactor-ratio",
+      explains:
+        "Median commit's deletion share of churn, inverted. Ramps 0.25 → 0.05; the 20-repo hand-written corpus measures 0.333–0.500. Unavailable below 50 commits or 14 active days — a young project has had no occasion to delete anything.",
+    },
+  },
+  "missing-license": {
+    plain: {
+      label: "No licence",
+      explains:
+        "Whether the project says who may use it. With no licence file, the default almost everywhere is that nobody may.",
+    },
+    technical: {
+      label: "missing-license",
+      explains:
+        "No LICENSE / COPYING / NOTICE file at any depth. Presence-shaped: it exists or it does not.",
+    },
+  },
+  "license-mismatch": {
+    plain: {
+      label: "Licence disagrees with itself",
+      explains:
+        "The licence file and the project's manifest name different licences, so nobody can tell which rules apply.",
+    },
+    technical: {
+      label: "license-mismatch",
+      explains:
+        "Manifest `license` field against the licence file identified by text fingerprint. SPDX expressions match on any of their terms, so dual licensing is not a mismatch. Dependency licences are not checked.",
+    },
+  },
+  "unauthenticated-routes": {
+    plain: {
+      label: "Pages that never check who is asking",
+      explains:
+        "Addresses that change or delete data without identifying the caller. Read-only addresses are not counted — plenty are public on purpose.",
+    },
+    technical: {
+      label: "unauthenticated-routes",
+      explains:
+        "Share of mutating routes with no auth call, session read, or 401/403 path in the handler. Middleware coverage is subtracted where its matcher is static.",
+    },
+  },
+  "dangerous-calls": {
+    plain: {
+      label: "Risky ways of running code",
+      explains:
+        "Commands, database queries or page fragments assembled out of values decided while the app runs. Build scripts are counted separately.",
+    },
+    technical: {
+      label: "dangerous-calls",
+      explains:
+        "eval, new Function, shell and query calls with interpolated arguments, raw HTML sinks, and wildcard CORS. Literal arguments are excluded.",
+    },
+  },
+  "vulnerable-dependencies": {
+    plain: {
+      label: "Packages with known problems",
+      explains:
+        "Installed packages that appear in public vulnerability databases. Packages used only for building are ranked below the ones that ship.",
+    },
+    technical: {
+      label: "vulnerable-dependencies",
+      explains:
+        "Full lockfile tree matched against OSV. Ramped on runtime-reachable matches; dev-only advisories are reported but excluded from the value.",
+    },
+  },
 };
 
 /**

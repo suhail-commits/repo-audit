@@ -4,40 +4,18 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 
 /**
- * The one question the landing page asks.
+ * The form asks for a repository and nothing else.
  *
- * Not which analyzers run — a scan always produces all three, because the
- * indexes are shared and skipping one saves almost nothing. It decides which
- * section the report leads with.
+ * It used to open with a three-way picker — vibe check, security, or code
+ * health. That question was never about which analyzers run: **a scan always
+ * produces all three**, because the indexes are shared and skipping one saves
+ * almost nothing. It only chose which section the report opened on.
  *
- * The persona question that used to live here has moved into the report, where
- * a switcher already exists. Two pickers in front of a text field is a lot to
- * ask before anyone has seen what the product does, and asking a question the
- * report then re-asks is worse than not asking it.
+ * So it was a question with no wrong answer, asked before anyone had seen what
+ * the product does, whose only effect was to hide two thirds of what we had
+ * already worked out. The report now shows all three, and the only thing left
+ * to ask is which repository.
  */
-const FOCUS_CHOICES = [
-  {
-    value: "authorship",
-    label: "Was this vibe coded?",
-    hint: "How much of it looks AI-written, and the evidence for that.",
-  },
-  {
-    value: "health",
-    label: "Is this code any good?",
-    hint: "Duplication, dead code, tests, and how it is put together.",
-  },
-  {
-    value: "security",
-    label: "Is this safe?",
-    hint: "Exposed keys, unprotected pages, risky code.",
-    /*
-     * Offered but not selectable. Hiding it would misrepresent the product's
-     * shape; letting it be picked would answer "not analysed yet" to the one
-     * question the visitor came with.
-     */
-    unavailable: "not built yet",
-  },
-] as const;
 
 /**
  * The scan runs inline, so the request can take several seconds. These describe
@@ -49,12 +27,15 @@ const STAGES = [
   "Reading the commit history…",
   "Parsing every source file…",
   "Looking for duplicated logic…",
+  // Named now that the report leads with all three checks rather than one. A
+  // wait that only mentions duplication makes the security section look like
+  // something we bolted on after the fact.
+  "Checking for exposed keys and open routes…",
   "Weighing the evidence…",
 ];
 
 export function StartScanForm() {
   const router = useRouter();
-  const [focus, setFocus] = useState<string>("authorship");
   const [repo, setRepo] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -84,7 +65,6 @@ export function StartScanForm() {
     );
 
     const body = new FormData();
-    body.set("focus", focus);
     body.set("repo", repo);
 
     try {
@@ -109,41 +89,6 @@ export function StartScanForm() {
 
   return (
     <form className="card" onSubmit={onSubmit}>
-      {/* The question comes before the input: decide what you want to know,
-          then say which repository to look at. */}
-      <fieldset className="field fieldset-reset">
-        <legend>What do you want to check?</legend>
-        <p className="hint">
-          We run every check either way &mdash; this decides what the report
-          leads with.
-        </p>
-        <div className="choices">
-          {FOCUS_CHOICES.map((choice) => {
-            const unavailable = "unavailable" in choice;
-            return (
-              <label
-                className={`choice${unavailable ? " choice-unavailable" : ""}`}
-                key={choice.value}
-              >
-                <input
-                  type="radio"
-                  name="focus"
-                  value={choice.value}
-                  checked={focus === choice.value}
-                  disabled={busy || unavailable}
-                  onChange={() => setFocus(choice.value)}
-                />
-                <strong>{choice.label}</strong>
-                <em>{choice.hint}</em>
-                {unavailable ? (
-                  <span className="choice-badge">{choice.unavailable}</span>
-                ) : null}
-              </label>
-            );
-          })}
-        </div>
-      </fieldset>
-
       <div className="field">
         <label htmlFor="repo">Public GitHub repository</label>
         <p className="hint">

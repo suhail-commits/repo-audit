@@ -16,15 +16,16 @@ export default async function HomePage() {
       <section className="hero">
         <h1>How much of your codebase did AI actually write?</h1>
         {/*
-          The picker below now offers more than the AI score, so the lede has
-          to as well — promising one thing and then asking which of three they
-          want reads as a page that was edited in two halves.
+          Names all three checks, because the report now opens with all three.
+          The page used to ask which one you wanted before you had seen any of
+          them — a question with no wrong answer whose only effect was to hide
+          the other two.
         */}
         <p>
-          Paste a public GitHub repository. You get a score for how much of it
-          looks AI-generated, a read on the state of the code, and every piece
-          of evidence behind both &mdash; taken from the code and the commit
-          history, not guessed at.
+          Paste a public GitHub repository. One scan, three answers: how much of
+          it looks AI-generated, what it exposes, and what it will cost to keep
+          working on &mdash; with every piece of evidence behind them, taken
+          from the code and the commit history rather than guessed at.
         </p>
         <ul className="hero-note">
           <li>No sign-up, no GitHub access</li>

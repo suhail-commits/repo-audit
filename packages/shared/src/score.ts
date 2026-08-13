@@ -67,10 +67,40 @@ export function healthBand(score: number): HealthBand {
 }
 
 /** The scale a dimension is drawn on, or none if it does not carry a score. */
+export type SecurityBand = "none" | "some" | "several" | "widespread";
+
+/**
+ * How much exposure was found — a quantity, never a verdict.
+ *
+ * The wording is the careful part. Security signals are presence-shaped, so a
+ * single committed credential saturates one check out of five and lands the
+ * score around twenty. Borrowing the health words would print **"solid"** on
+ * the same screen as a live AWS key, and the authorship words — which this
+ * dimension used by default — printed **"21 out of 100 — unlikely"**, which
+ * answers a question nobody asked.
+ *
+ * So these label the *amount measured* and leave the judgement to the headline,
+ * which is taken from the worst finding precisely because the number cannot
+ * carry it. "some" above a critical finding is a statement about how much was
+ * found, and does not contradict "this needs fixing today".
+ */
+export const SECURITY_BANDS: readonly {
+  band: SecurityBand;
+  from: number;
+  label: string;
+}[] = [
+  { band: "none", from: 0, label: "nothing found" },
+  { band: "some", from: 15, label: "some" },
+  { band: "several", from: 40, label: "several" },
+  { band: "widespread", from: 70, label: "widespread" },
+];
+
 export function bandsFor(
   dimension: string,
 ): readonly { from: number; label: string }[] {
-  return dimension === "health" ? HEALTH_BANDS : AUTHORSHIP_BANDS;
+  if (dimension === "health") return HEALTH_BANDS;
+  if (dimension === "security") return SECURITY_BANDS;
+  return AUTHORSHIP_BANDS;
 }
 
 /** How a confidence level should be described to a reader. */

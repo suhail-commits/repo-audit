@@ -42,6 +42,8 @@ export async function POST(request: Request): Promise<Response> {
 
   try {
     const result = await scanGitHubRepository(slug, {
+      // Public deployment: the dependency lookup is worth the extra requests.
+      checkVulnerabilities: true,
       maxSizeKb: MAX_REPO_KB,
       ...(process.env["GITHUB_TOKEN"]
         ? { token: process.env["GITHUB_TOKEN"] }
@@ -70,11 +72,12 @@ function readPersona(value: FormDataEntryValue | null): Persona {
 }
 
 /**
- * Which question the visitor came to ask.
+ * Vestigial, and kept deliberately.
  *
- * Presentation only — one scan produces all three dimensions regardless, since
- * the indexes are shared and skipping an analyzer would save almost nothing.
- * This decides which section leads the report.
+ * The form no longer submits a focus — the report renders every dimension, so
+ * there is nothing left to select. The column is still written because rows
+ * already carry it and the read path still validates it; dropping it would be a
+ * migration in exchange for one unused string.
  */
 function readFocus(value: FormDataEntryValue | null): Dimension {
   return typeof value === "string" && DIMENSIONS.includes(value as Dimension)

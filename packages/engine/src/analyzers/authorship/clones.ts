@@ -24,8 +24,31 @@ import { ramp, type AnalysisContext } from "../context";
 
 export const WEIGHT = 2.5;
 
-/** Functions smaller than this match by coincidence and are ignored. */
-const MIN_NODES = 18;
+/**
+ * Functions smaller than this match by coincidence and are ignored.
+ *
+ * **Raised from 18 after reading the report this tool produces about itself.**
+ * At 18, every one of the eight Code health findings on this repository was a
+ * pair of one-line helpers: `isTestFile` and `isGeneratedPath`
+ * (`return PATTERNS.some((p) => p.test(relPath))`), `importsOf` and
+ * `importersOf`, `authorshipBand` and `healthBand`. Each really is the same
+ * shape, and saying so is useless — two guard clauses that both delegate to
+ * `.some()` are not a duplication problem, they are what a small function looks
+ * like.
+ *
+ * A TypeScript one-liner reaches about 19 named nodes once its parameter types,
+ * return type and the arrow inside it are counted, which is why 18 caught them
+ * and why the figure has to clear that band rather than sit against it. 30 also
+ * matches what Go and Rust already use for the same reason — the threshold is
+ * about how many nodes a language spends before saying anything, and annotated
+ * TypeScript spends about as many as Go does.
+ *
+ * The cost is real and accepted: a genuinely duplicated short helper is now
+ * missed. **A false positive costs more than a missed finding**, and eight
+ * trivial ones at the top of a section is how a reader decides the tool is
+ * naive.
+ */
+const MIN_NODES = 30;
 
 /**
  * Per-language node names, because "identifier" and "a function" are spelled

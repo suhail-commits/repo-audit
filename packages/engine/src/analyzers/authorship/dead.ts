@@ -4,6 +4,7 @@ import type { ParsedFile } from "../../index/ast";
 import { isJsTsFile } from "../../ingest/guards";
 import { unusedDependencies } from "../../index/frameworks";
 import { ramp, type AnalysisContext } from "../context";
+import { countOf } from "../../format";
 
 /**
  * Abandoned scaffolding: dependencies nothing imports, files nothing reaches, and
@@ -103,7 +104,11 @@ export function unusedDependencySignal(ctx: AnalysisContext): Signal {
   }
 
   const imported = ctx.graph.importedPackages;
-  const unused = unusedDependencies(ctx.frameworks, imported);
+  const unused = unusedDependencies(
+    ctx.frameworks,
+    imported,
+    packagesNamedInSource(ctx),
+  );
   const ratio = unused.length / declared.length;
 
   return {
@@ -119,6 +124,45 @@ export function unusedDependencySignal(ctx: AnalysisContext): Signal {
             `Unused: ${unused.slice(0, 8).join(", ")}${unused.length > 8 ? ", …" : ""}`,
           ],
   };
+}
+
+/**
+ * Declared packages whose name appears as a string literal in the source.
+ *
+ * Checked only against the names still in question — the set is small by the
+ * time this runs, so this is a handful of substring scans rather than a search
+ * for every dependency in every file.
+ *
+ * **The quote is what makes it safe.** A bare `content.includes(name)` would
+ * match `ms` inside "items", "forms" and every comment on the page, and short
+ * package names are common. Requiring a quote before the name and a quote or
+ * `/` after it means `"ms"` and `require.resolve("ms/index.js")` count while
+ * prose does not.
+ */
+function packagesNamedInSource(ctx: AnalysisContext): Set<string> {
+  const candidates = Object.keys(ctx.frameworks.runtimeDependencies).filter(
+    (name) => !ctx.graph.importedPackages.has(name),
+  );
+  if (candidates.length === 0) return new Set();
+
+  const patterns = candidates.map((name) => ({
+    name,
+    re: new RegExp(`["'\`]${escapeRegExp(name)}["'\`/]`),
+  }));
+
+  const found = new Set<string>();
+  for (const file of ctx.files.codeFiles()) {
+    for (const { name, re } of patterns) {
+      if (found.has(name)) continue;
+      if (re.test(file.content)) found.add(name);
+    }
+    if (found.size === patterns.length) break;
+  }
+  return found;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 export function orphanFileSignal(ctx: AnalysisContext): Signal {
@@ -237,7 +281,7 @@ export function overlappingUtilsSignal(ctx: AnalysisContext): Signal {
   ];
   if (collisions.length > 0) {
     evidence.push(
-      `${collisions.length} export name(s) declared in more than one of them: ${collisions
+      `${countOf(collisions.length, "export name")} declared in more than one of them: ${collisions
         .slice(0, 5)
         .map(([name]) => name)
         .join(", ")}`,
@@ -261,7 +305,11 @@ export function deadCodeFindings(ctx: AnalysisContext): Finding[] {
   const findings: Finding[] = [];
 
   const imported = ctx.graph.importedPackages;
-  const unused = unusedDependencies(ctx.frameworks, imported);
+  const unused = unusedDependencies(
+    ctx.frameworks,
+    imported,
+    packagesNamedInSource(ctx),
+  );
   if (unused.length > 0) {
     findings.push({
       ruleId: "unused-dependencies",

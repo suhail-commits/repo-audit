@@ -117,6 +117,41 @@ export function notAnalysedHeadline(
 }
 
 /**
+ * Heading for the cross-section shortlist.
+ *
+ * Phrased as an *ordering* of what was found, never as an instruction. "Fix
+ * these" would assert that each item is a defect worth a developer's afternoon,
+ * which is a judgement about someone else's priorities that nothing here
+ * measured. We ranked what we found; the reader decides what to do with it.
+ */
+export function prioritiesTitle(persona: Persona): string {
+  if (persona === "engineer") return "Ranked by severity";
+  if (persona === "acquirer") return "Most material findings";
+  return "Where we'd look first";
+}
+
+/**
+ * The line under that heading, naming the rule the ordering used.
+ *
+ * `total` is every actionable finding, `shown` the head of the list. Saying how
+ * many were left out matters: a shortlist that silently truncates reads as the
+ * complete set, which is the same mistake as a capped scan reporting "covered
+ * everything".
+ */
+export function prioritiesCaveat(
+  shown: number,
+  total: number,
+  persona: Persona,
+): string {
+  const rule =
+    persona === "engineer"
+      ? "Severity, then confidence."
+      : "Most serious first, and where we are surest.";
+  if (total <= shown) return rule;
+  return `${rule} ${total - shown} more below.`;
+}
+
+/**
  * The caveat under the ranking.
  *
  * `count` is computed from the signals that actually contributed, not written

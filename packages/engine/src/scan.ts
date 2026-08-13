@@ -8,6 +8,10 @@ import { analyzeAuthorship, type AuthorshipOptions } from "./analyzers/authorshi
 import type { AnalysisContext } from "./analyzers/context";
 import { analyzeHealth } from "./analyzers/health/index";
 import {
+  analyzeSecurity,
+  type SecurityOptions,
+} from "./analyzers/security/index";
+import {
   GitHubError,
   fetchCommits,
   fetchRepoMeta,
@@ -23,8 +27,10 @@ import { ImportGraph } from "./index/imports";
 import { profileLanguages } from "./index/language";
 import { StructuralIndex } from "./index/structural";
 import { RouteTable } from "./index/routes";
+import { isJsTsFile } from "./ingest/guards";
+import { buildModuleGraph } from "./score/module-graph";
 
-export interface ScanOptions extends AuthorshipOptions {
+export interface ScanOptions extends AuthorshipOptions, SecurityOptions {
   /** How the source arrived; determines which signals are possible. */
   kind: "github" | "zip";
   /** Display name — "owner/repo" or the uploaded filename. */
@@ -78,6 +84,7 @@ export async function scanRepository(
   // Health re-weights the structural signals authorship already computed rather
   // than measuring them again — see `analyzers/health/index.ts`.
   const health = analyzeHealth(ctx, authorship.score.signals);
+  const security = await analyzeSecurity(ctx, options);
 
   const warnings = [
     ...ctx.files.warnings,
@@ -86,6 +93,7 @@ export async function scanRepository(
     ...ctx.git.warnings,
     ...ctx.routes.warnings,
     ...tierWarnings(ctx),
+    ...security.warnings,
   ];
 
   return {
@@ -101,23 +109,48 @@ export async function scanRepository(
       frameworks: ctx.frameworks.names,
       languages: ctx.languages.shares,
       analysisTier: ctx.languages.dominantTier,
+      // Newest commit first, so the head of the history is the revision the
+      // files on disk correspond to. Absent for a source with no history.
+      ...(ctx.git.commits[0]?.sha
+        ? { headSha: ctx.git.commits[0].sha }
+        : {}),
     },
     // Authorship first: the narrator takes its headline from `scores[0]`.
-    scores: [authorship.score, health.score],
-    findings: authorship.findings,
+    scores: [authorship.score, security.score, health.score],
+    findings: [...authorship.findings, ...security.findings],
     metrics: collectMetrics(ctx, authorship.clones.clonedFunctions),
     /*
-     * `security` is absent because no security analyzer exists yet — see the
-     * deferred work in README. Add it here in the same commit that registers
-     * the analyzer, so the report can never claim a check that did not run.
+     * Named here in the same commit that registers each analyzer, so the report
+     * can never claim a check that did not run.
+     *
+     * `security` is listed unconditionally even though its dependency check is
+     * opt-in: an analyzer that ran and reported one signal unavailable is a
+     * different thing from a dimension nobody looked at, and that distinction
+     * is exactly what this array exists to carry. The unavailable signal states
+     * its own reason.
      */
-    analysedDimensions: ["authorship", "health"],
+    analysedDimensions: ["authorship", "security", "health"],
+    /*
+     * Built from edges the index already resolved, so this costs a grouping
+     * pass and no new parsing. Returns undefined rather than an empty graph
+     * when there is nothing honest to draw — see `buildModuleGraph`.
+     */
+    moduleGraph: buildModuleGraph({
+      files: ctx.files
+        .sourceFiles()
+        .map((f) => f.relPath)
+        .filter(isJsTsFile),
+      edges: ctx.graph.edges,
+    }),
     durationMs: Date.now() - started,
     warnings,
   };
 }
 
-export interface GitHubScanOptions extends GitHubOptions, AuthorshipOptions {
+export interface GitHubScanOptions
+  extends GitHubOptions,
+    AuthorshipOptions,
+    SecurityOptions {
   /**
    * Refuse repositories larger than this, in kilobytes as GitHub reports them.
    * A size gate up front produces an honest error; without one a large repo
@@ -198,6 +231,8 @@ export async function scanGitHubRepository(
         truncated: history.truncated,
       }),
       ...(options.structuralOnly ? { structuralOnly: true } : {}),
+      ...(options.checkVulnerabilities ? { checkVulnerabilities: true } : {}),
+      ...(options.osv ? { osv: options.osv } : {}),
     });
 
     // scanRepository times only the analysis; report the whole round trip.

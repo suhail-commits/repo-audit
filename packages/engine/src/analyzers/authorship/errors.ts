@@ -9,6 +9,7 @@ import {
 } from "../../index/ast";
 import { collectNamed, type StructuralFile, type TsNode } from "../../index/structural";
 import { ramp, unavailable, type AnalysisContext } from "../context";
+import { countOf } from "../../format";
 
 /**
  * Error handlers that catch a failure and then discard it.
@@ -95,7 +96,7 @@ export function swallowedErrorSignal(ctx: AnalysisContext): Signal {
     // Say this out loud: it is the difference between a codebase that ignores
     // failures and one that decided to, and the reader should know we can tell.
     evidence.push(
-      `${tally.documented} empty handler(s) carry an explanatory comment and were not counted`,
+      `${countOf(tally.documented, "empty handler")} carry an explanatory comment and were not counted`,
     );
   }
 

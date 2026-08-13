@@ -3,6 +3,7 @@ import { parseSync } from "oxc-parser";
 import { isJsTsFile } from "../ingest/guards";
 
 import type { FileIndex, IndexedFile } from "./files";
+import { countOf } from "../format";
 
 /** Minimal structural shape shared by every ESTree node oxc emits. */
 export interface AstNode {
@@ -112,7 +113,7 @@ export class AstIndex {
     }
 
     if (failed > 0) {
-      index.warnings.push(`${failed} file(s) could not be parsed`);
+      index.warnings.push(`${countOf(failed, "file")} could not be parsed`);
     }
     return index;
   }

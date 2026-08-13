@@ -1,5 +1,6 @@
 import {
   confidencePhrase,
+  confidenceRank,
   authorshipBand,
   healthBand,
   severityRank,
@@ -17,6 +18,15 @@ import type {
   NarratedScore,
   Narrator,
 } from "./types";
+
+/**
+ * How many findings the "start here" list carries.
+ *
+ * Small on purpose. A shortlist of twelve is the same wall of findings the
+ * reader already has below, moved higher up — the value is in it being short
+ * enough to actually act on.
+ */
+const MAX_PRIORITIES = 5;
 
 /**
  * The deterministic narrator: every sentence comes from a hand-written template
@@ -41,24 +51,36 @@ export class TemplateNarrator implements Narrator {
     };
   }
 
-  score(score: DimensionScore, persona: Persona): NarratedScore {
+  score(
+    score: DimensionScore,
+    persona: Persona,
+    findings: Finding[] = [],
+  ): NarratedScore {
     return {
       dimension: score.dimension,
       score: score.score,
-      headline: this.scoreHeadline(score, persona),
+      headline: this.scoreHeadline(score, persona, findings),
       evidence: this.scoreEvidence(score),
       caveats: this.scoreCaveats(score, persona),
     };
   }
 
   report(result: ScanResult, persona: Persona): NarratedReport {
-    const scores = result.scores.map((s) => this.score(s, persona));
+    const scores = result.scores.map((s) =>
+      this.score(s, persona, result.findings),
+    );
 
-    // Worst first; ties broken by how many places the problem appears.
+    /*
+     * Worst first. Confidence breaks the severity tie before location count
+     * does: between two medium findings, the one we are surer of belongs
+     * higher, and counting locations first would let a widely-spread guess
+     * outrank a single certain fact.
+     */
     const findings = [...result.findings]
       .sort(
         (a, b) =>
           severityRank(b.severity) - severityRank(a.severity) ||
+          confidenceRank(b.confidence) - confidenceRank(a.confidence) ||
           b.locations.length - a.locations.length,
       )
       .map((f) => this.finding(f, persona));
@@ -68,6 +90,7 @@ export class TemplateNarrator implements Narrator {
       headline: scores[0]?.headline ?? "No analysis was produced for this repository.",
       summary: this.summary(result, persona),
       verdict: this.verdict(result, persona),
+      priorities: shortlist(findings),
       scores,
       findings,
     };
@@ -149,12 +172,16 @@ export class TemplateNarrator implements Narrator {
     return `${opening} ${context}${caveat}`;
   }
 
-  private scoreHeadline(score: DimensionScore, persona: Persona): string {
+  private scoreHeadline(
+    score: DimensionScore,
+    persona: Persona,
+    findings: Finding[],
+  ): string {
     if (score.dimension === "health") {
       return this.healthHeadline(score, persona);
     }
-    if (score.dimension !== "authorship") {
-      return `${score.dimension}: ${score.score}/100`;
+    if (score.dimension === "security") {
+      return this.securityHeadline(score, persona, findings);
     }
 
     const band = authorshipBand(score.score);
@@ -197,6 +224,86 @@ export class TemplateNarrator implements Narrator {
         return "Parts of this app look like they were written by AI coding tools.";
       case "unlikely":
         return "This mostly looks like hand-written code.";
+    }
+  }
+
+  /**
+   * The security verdict, taken from the worst finding rather than the score.
+   *
+   * **This is the one headline that must not follow its own number.** Security
+   * signals are presence-shaped: a single committed AWS key saturates one
+   * signal out of five and lands the dimension somewhere in the twenties, and a
+   * band word derived from twenty-something would say "minor issues" directly
+   * above a live credential. The number is a summary of how much was found; the
+   * severity is what the reader has to act on.
+   *
+   * The empty case is equally load-bearing and runs the other way: "nothing
+   * found" is only allowed to sound like "nothing there" when every check
+   * actually ran. With a check unavailable, the sentence says what was not
+   * looked at instead — an unreachable vulnerability database is not a clean
+   * bill of health.
+   */
+  private securityHeadline(
+    score: DimensionScore,
+    persona: Persona,
+    findings: Finding[],
+  ): string {
+    const actionable = findings
+      .filter((f) => f.dimension === "security" && f.severity !== "info")
+      .sort((a, b) => severityRank(b.severity) - severityRank(a.severity));
+
+    const worst = actionable[0];
+    const measured = score.signals.filter((s) => s.available).length;
+    const total = score.signals.length;
+    const gaps = total - measured;
+
+    if (persona === "engineer") {
+      if (!worst) {
+        return (
+          `Security ${score.score}/100 — no findings ` +
+          `(${measured}/${total} checks ran)`
+        );
+      }
+      return (
+        `Security ${score.score}/100 — ${actionable.length} finding` +
+        `${actionable.length === 1 ? "" : "s"}, worst ${worst.severity} ` +
+        `(${measured}/${total} checks ran)`
+      );
+    }
+
+    if (!worst) {
+      return gaps > 0
+        ? persona === "acquirer"
+          ? `No exposure found, but ${gaps} of ${total} checks could not run — treat as partial coverage.`
+          : `We found nothing exposed — though ${gaps} of the ${total} checks could not run here.`
+        : persona === "acquirer"
+          ? "No exposure found across all checks."
+          : "We did not find anything exposed.";
+    }
+
+    const count = actionable.length;
+    if (persona === "acquirer") {
+      switch (worst.severity) {
+        case "critical":
+          return `Critical exposure: ${worst.title}. Remediate before proceeding.`;
+        case "high":
+          return `Material exposure found — ${count} item${count === 1 ? "" : "s"}, worst: ${worst.title}.`;
+        default:
+          return `${count} security item${count === 1 ? "" : "s"} to review; nothing critical.`;
+      }
+    }
+
+    switch (worst.severity) {
+      case "critical":
+        return `Something here needs fixing today: ${worst.title.toLowerCase()}.`;
+      case "high":
+        return `There is something worth fixing soon: ${worst.title.toLowerCase()}.`;
+      case "medium":
+        return count === 1
+          ? `One thing is worth a look: ${worst.title.toLowerCase()}.`
+          : `${count} things are worth a look here.`;
+      default:
+        return `Nothing serious, but ${count} small thing${count === 1 ? "" : "s"} came up.`;
     }
   }
 
@@ -278,17 +385,27 @@ export class TemplateNarrator implements Narrator {
 
     const reasons = [...new Set(score.unavailable)];
 
+    /*
+     * Semicolons, not `list()`.
+     *
+     * Each reason is already a clause with its own comma and em-dash — "only 1
+     * active day of commits — a rate needs a longer span". Comma-joining four of
+     * those with a trailing "and" produced one unreadable forty-word sentence
+     * where the reader could not tell which clause belonged to which check.
+     */
+    const joined = reasons.join("; ");
+
     if (persona === "founder") {
+      // Two paragraphs rather than one: the first is the point, the second is
+      // the list. Run together, the point gets lost in front of the list.
       return [
         `A lower score from missing evidence is not a cleaner codebase — ` +
-          `it only means we had less to go on. Skipped: ${list(reasons)}.`,
+          `it only means we had less to go on.`,
+        `Not measured here: ${joined}.`,
       ];
     }
 
-    return [
-      confidencePhrase(score.confidence),
-      `Unavailable: ${list(reasons, 6)}.`,
-    ];
+    return [confidencePhrase(score.confidence), `Unavailable: ${joined}.`];
   }
 
   private summary(result: ScanResult, persona: Persona): string {
@@ -333,6 +450,34 @@ export class TemplateNarrator implements Narrator {
         : "We could not see your project's history, so some checks were skipped.")
     );
   }
+}
+
+/**
+ * The head of the ranked list, one entry per rule.
+ *
+ * Ranking alone is not enough. Clone detection emits one finding per family, so
+ * a repository with four duplicated helpers filled four of five slots with
+ * "near-identical copies of the same function" — the reader learns one thing,
+ * five times, and four genuinely different problems are pushed off the list.
+ *
+ * Taking the first of each rule works because the input is already in rank
+ * order, so the survivor is the worst instance of its kind. Nothing is hidden:
+ * the section below still lists every finding, and the caveat counts against
+ * the full actionable set rather than against the deduplicated one.
+ */
+function shortlist(ranked: NarratedFinding[]): NarratedFinding[] {
+  const seen = new Set<string>();
+  const out: NarratedFinding[] = [];
+
+  for (const finding of ranked) {
+    if (finding.severity === "info") continue;
+    if (seen.has(finding.ruleId)) continue;
+    seen.add(finding.ruleId);
+    out.push(finding);
+    if (out.length === MAX_PRIORITIES) break;
+  }
+
+  return out;
 }
 
 /**

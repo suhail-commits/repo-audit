@@ -1,8 +1,15 @@
 import { buildContext, analyzeAuthorship, analyzeHealth } from "@vibe/engine";
 import { createFixtureRepo } from "@vibe/engine/testing";
-import type { Finding, ScanResult } from "@vibe/shared";
+import {
+  PERSONAS,
+  type DimensionScore,
+  type Finding,
+  type ScanResult,
+  type Signal,
+} from "@vibe/shared";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { prioritiesCaveat } from "./dimension-labels";
 import { TemplateNarrator } from "./narrator";
 import { signalLabel, labelledSignalIds } from "./signal-labels";
 import { FALLBACK_TEMPLATE, templateFor, templatedRuleIds } from "./templates";
@@ -177,6 +184,38 @@ describe("persona voice", () => {
     const a = narrator.finding(finding, "founder");
     const b = narrator.finding(finding, "founder");
     expect(a).toEqual(b);
+  });
+
+  it("fills every placeholder in the licence-mismatch prose", () => {
+    /*
+     * The template reads five keys out of `data`. A typo in any of them prints
+     * the string "undefined" into the report and nothing fails — the template
+     * coverage test only proves a template exists, not that it was given what
+     * it asks for. This is the one finding whose prose no fixture produces.
+     */
+    const finding: Finding = {
+      ruleId: "license-mismatch",
+      dimension: "security",
+      severity: "medium",
+      confidence: "high",
+      source: "builtin",
+      title: "The licence file and the manifest disagree",
+      locations: [{ file: "LICENSE" }, { file: "package.json" }],
+      data: {
+        declared: "MIT",
+        identified: "AGPL-3.0",
+        declaredIn: "package.json",
+        licenseFile: "LICENSE",
+      },
+    };
+
+    for (const persona of PERSONAS) {
+      const rendered = narrator.finding(finding, persona);
+      const text = [rendered.title, rendered.body, ...rendered.detail].join(" ");
+      expect(text, persona).not.toContain("undefined");
+      expect(text, persona).toContain("AGPL-3.0");
+      expect(text, persona).toContain("MIT");
+    }
   });
 
   it("falls back gracefully for an unknown rule", () => {
@@ -472,5 +511,265 @@ describe("score narration", () => {
     expect(
       narrator.report(result, "engineer").findings.map((f) => f.severity),
     ).toEqual(["critical", "medium", "low"]);
+  });
+});
+
+/**
+ * The shortlist exists because the report shows one dimension at a time, so a
+ * reader looking at Code health has no way to learn that the worst thing in the
+ * repository is two tabs away.
+ */
+describe("what to look at first", () => {
+  const mk = (
+    id: string,
+    severity: Finding["severity"],
+    over: Partial<Finding> = {},
+  ): Finding => ({
+    ruleId: id,
+    dimension: "authorship",
+    severity,
+    confidence: "high",
+    source: "builtin",
+    title: id,
+    locations: [],
+    data: {},
+    ...over,
+  });
+
+  function resultWith(findings: Finding[]): ScanResult {
+    return {
+      schemaVersion: 1,
+      repo: {
+        kind: "zip",
+        name: "demo",
+        rootPath: "/tmp/demo",
+        hasGitHistory: false,
+        fileCount: 20,
+        sourceFileCount: 14,
+        totalLoc: 1200,
+        frameworks: [],
+        languages: [],
+        analysisTier: "full" as const,
+      },
+      scores: [],
+      findings,
+      metrics: [],
+      analysedDimensions: ["authorship" as const],
+      durationMs: 10,
+      warnings: [],
+    };
+  }
+
+  it("crosses dimensions — the worst thing wins whichever section it is in", () => {
+    const report = narrator.report(
+      resultWith([
+        mk("dup", "medium", { dimension: "health" }),
+        mk("key", "critical", { dimension: "security" }),
+        mk("dead", "low", { dimension: "health" }),
+      ]),
+      "founder",
+    );
+
+    expect(report.priorities.map((f) => f.ruleId)).toEqual([
+      "key",
+      "dup",
+      "dead",
+    ]);
+    expect(report.priorities[0]!.dimension).toBe("security");
+  });
+
+  it("breaks a severity tie on confidence, not on how widespread it is", () => {
+    /*
+     * A guess that appears in thirty files must not outrank a fact that appears
+     * in one. Counting locations first did exactly that, which is why the
+     * comparator gained a confidence term.
+     */
+    const spread = mk("guess", "medium", {
+      confidence: "low",
+      locations: Array.from({ length: 30 }, (_, i) => ({ file: `f${i}.ts` })),
+    });
+    const sure = mk("fact", "medium", { confidence: "certain" });
+
+    const report = narrator.report(resultWith([spread, sure]), "engineer");
+    expect(report.priorities.map((f) => f.ruleId)).toEqual(["fact", "guess"]);
+  });
+
+  it("leaves out info findings — they are context, not tasks", () => {
+    const report = narrator.report(
+      resultWith([
+        mk("tooling", "info", { confidence: "certain" }),
+        mk("dup", "low"),
+      ]),
+      "founder",
+    );
+
+    expect(report.priorities.map((f) => f.ruleId)).toEqual(["dup"]);
+  });
+
+  it("is empty on a clean repo rather than padded with information", () => {
+    const report = narrator.report(
+      resultWith([mk("tooling", "info", { confidence: "certain" })]),
+      "founder",
+    );
+    expect(report.priorities).toEqual([]);
+  });
+
+  it("caps the list and says how many were left out", () => {
+    const many = Array.from({ length: 9 }, (_, i) => mk(`r${i}`, "medium"));
+    const report = narrator.report(resultWith(many), "founder");
+
+    expect(report.priorities).toHaveLength(5);
+    // The full set stays reachable below; only the shortlist is capped.
+    expect(report.findings).toHaveLength(9);
+    expect(prioritiesCaveat(5, 9, "founder")).toMatch(/4 more below/);
+  });
+
+  it("shows each rule once, so one noisy rule cannot fill the list", () => {
+    /*
+     * Clone detection emits one finding per family. On this repository four of
+     * the five slots were "near-identical copies of the same function" — the
+     * reader learns one thing, five times, while four different problems are
+     * pushed off the list.
+     */
+    const report = narrator.report(
+      resultWith([
+        mk("dup", "medium"),
+        mk("dup", "medium"),
+        mk("dup", "medium"),
+        mk("dup", "medium"),
+        mk("dead", "low"),
+        mk("untested", "low"),
+      ]),
+      "founder",
+    );
+
+    expect(report.priorities.map((f) => f.ruleId)).toEqual([
+      "dup",
+      "dead",
+      "untested",
+    ]);
+    // Nothing is hidden — the section below still carries every one of them.
+    expect(report.findings).toHaveLength(6);
+  });
+
+  it("keeps the worst instance when a rule fires more than once", () => {
+    const report = narrator.report(
+      resultWith([
+        mk("secret", "low"),
+        mk("secret", "critical"),
+        mk("secret", "medium"),
+      ]),
+      "engineer",
+    );
+
+    expect(report.priorities).toHaveLength(1);
+    expect(report.priorities[0]!.severity).toBe("critical");
+  });
+
+  it("does not truncate silently when everything fits", () => {
+    expect(prioritiesCaveat(3, 3, "founder")).not.toMatch(/more below/);
+  });
+
+  it("orders the shortlist identically to the section list", () => {
+    // Same objects, not merely equal ones — a priority and its entry in the
+    // section must never drift apart.
+    const report = narrator.report(
+      resultWith([mk("a", "low"), mk("b", "critical"), mk("c", "high")]),
+      "engineer",
+    );
+    expect(report.priorities[0]).toBe(report.findings[0]);
+  });
+});
+
+/**
+ * The security headline is the one that must not follow its own number.
+ *
+ * Its signals are presence-shaped, so a single committed credential saturates
+ * one check out of five and lands the dimension in the twenties. A band word
+ * taken from twenty-something would read "minor issues" directly above a live
+ * key. These pin the behaviour, because the first implementation simply fell
+ * through to `${dimension}: ${score}/100` and rendered "security: 21/100".
+ */
+describe("security headline", () => {
+  const signal = (id: string, available: boolean): Signal =>
+    available
+      ? { id, value: 0, weight: 1, available: true, evidence: [] }
+      : {
+          id,
+          value: 0,
+          weight: 1,
+          available: false,
+          evidence: [],
+          unavailableReason: `${id} had nothing to judge`,
+        };
+
+  const score = (value: number, availableCount: number): DimensionScore => ({
+    dimension: "security",
+    score: value,
+    confidence: "high",
+    signals: [
+      signal("a", availableCount > 0),
+      signal("b", availableCount > 1),
+      signal("c", availableCount > 2),
+    ],
+    unavailable: [],
+    hotspots: [],
+  });
+
+  const finding = (severity: Finding["severity"], title: string): Finding => ({
+    ruleId: "hardcoded-secret",
+    dimension: "security",
+    severity,
+    confidence: "certain",
+    source: "builtin",
+    title,
+    locations: [],
+    data: {},
+  });
+
+  it("leads with the worst finding, not the score", () => {
+    const narrated = narrator.score(score(8, 3), "founder", [
+      finding("low", "Something small"),
+      finding("critical", "AWS access key ID committed to the repository"),
+    ]);
+
+    expect(narrated.headline).toContain("needs fixing today");
+    expect(narrated.headline).toContain("aws access key id");
+    // The number is still 8; it must not be what sets the register.
+    expect(narrated.headline).not.toContain("8/100");
+  });
+
+  it("names the severity and count for the engineer", () => {
+    const narrated = narrator.score(score(21, 3), "engineer", [
+      finding("medium", "A route does not check the caller"),
+    ]);
+
+    expect(narrated.headline).toBe(
+      "Security 21/100 — 1 finding, worst medium (3/3 checks ran)",
+    );
+  });
+
+  it("ignores info findings when choosing the register", () => {
+    const narrated = narrator.score(score(0, 3), "founder", [
+      { ...finding("info", "Context only"), severity: "info" },
+    ]);
+
+    expect(narrated.headline).toBe("We did not find anything exposed.");
+  });
+
+  /**
+   * "Nothing found" may only sound like "nothing there" when everything ran.
+   * An unreachable vulnerability database is not a clean bill of health.
+   */
+  it("will not say clean when a check could not run", () => {
+    const narrated = narrator.score(score(0, 2), "founder", []);
+
+    expect(narrated.headline).toContain("1 of the 3 checks could not run");
+  });
+
+  it("says so plainly when every check ran and found nothing", () => {
+    const narrated = narrator.score(score(0, 3), "acquirer", []);
+
+    expect(narrated.headline).toBe("No exposure found across all checks.");
   });
 });
