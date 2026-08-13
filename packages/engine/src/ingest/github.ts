@@ -433,9 +433,11 @@ async function fetchCommitsGraphql(
     timestamp: Date.parse(node.committedDate),
     subject: node.message.split("\n")[0] ?? "",
     body: node.message,
-    // Filenames are not available; churn is, which is what commit-size needs.
+    // Filenames are not available, but the line counts are — and GraphQL gives
+    // them split, so `linesAdded` is exact here rather than inferred.
     files: [],
     churn: node.additions + node.deletions,
+    linesAdded: node.additions,
   }));
 
   return { commits, statsComplete: false, truncated };
@@ -476,8 +478,12 @@ async function fetchCommitsRest(
       // git's %s and %B: subject is the first line, body is the whole message.
       subject: entry.commit.message.split("\n")[0] ?? "",
       body: entry.commit.message,
+      // The REST list endpoint carries no line counts at all. Zero here is not
+      // "nothing changed" — the signals that need counts detect the absence and
+      // report themselves unavailable rather than reading it as a clean repo.
       files: [],
       churn: 0,
+      linesAdded: 0,
     };
   });
 

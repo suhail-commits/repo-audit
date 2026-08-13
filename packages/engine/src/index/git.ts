@@ -24,6 +24,16 @@ export interface Commit {
   files: CommitFileChange[];
   /** Sum of added + deleted across the commit. */
   churn: number;
+  /**
+   * Lines added by this commit, without deletions.
+   *
+   * Carried separately from `churn` and from `files` because it is the one
+   * quantity that survives every history source. The GitHub API returns
+   * per-commit `additions` but no filenames, so `files` is empty there — a
+   * signal reading `files[].added` would work on a local checkout and report
+   * nothing at all on the deployed product, which fetches over the API.
+   */
+  linesAdded: number;
 }
 
 /**
@@ -226,6 +236,7 @@ export function parseGitLog(raw: string): Commit[] {
 
     const files: CommitFileChange[] = [];
     let churn = 0;
+    let linesAdded = 0;
     for (const line of numstat.split("\n")) {
       const trimmed = line.trim();
       if (trimmed === "") continue;
@@ -236,6 +247,7 @@ export function parseGitLog(raw: string): Commit[] {
       const deleted = cols[1] === "-" ? 0 : Number.parseInt(cols[1]!, 10) || 0;
       files.push({ relPath: normalizePath(cols[2]!), added, deleted });
       churn += added + deleted;
+      linesAdded += added;
     }
 
     commits.push({
@@ -247,6 +259,7 @@ export function parseGitLog(raw: string): Commit[] {
       body,
       files,
       churn,
+      linesAdded,
     });
   }
 
