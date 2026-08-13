@@ -188,12 +188,28 @@ carefully written codebase — whoever or whatever wrote it — that is exactly 
 The report is three sections: **authorship** (how much looks AI-written), **security**, and
 **health** (duplication, dead code, test quality, structure).
 
-Authorship analysis is complete and calibrated, and health is populated from the structural
-signals. Security analysis — exposed secrets, route-level auth coverage, dangerous sinks — is the
-next piece; secrets detection works on any language, the rest is deliberately JavaScript and
-TypeScript only because those rules need framework semantics rather than syntax.
+All three are built, and the report shows all three — the landing page asks for a repository and
+nothing else. Authorship is complete and calibrated, health is populated from the structural
+signals, and security runs seven checks: committed credentials, committed `.env` files, routes that
+change data without checking the caller, dangerous calls and wildcard CORS, dependencies with
+published vulnerabilities, a missing licence, and a licence file that contradicts the manifest.
 
-The Security section renders as **"not analysed yet"** rather than being hidden. An absent section
-reads as a clean bill of health, and only one of those is true. `ScanResult.analysedDimensions`
-records which dimensions an analyzer actually ran for, because a dimension that ran and found
-nothing produces output identical to one that never looked.
+All but two work on **any language** — credential formats are vendor-assigned, OSV covers npm,
+PyPI, Go and crates.io, and a licence is a licence. The route and sink checks are deliberately
+JavaScript and TypeScript only, because they need framework semantics rather than syntax.
+
+Licensing sits inside security rather than in a section of its own: it asks the same question —
+what does this repository expose that its owner may not know about — and it is the first thing
+technical due diligence looks at. **Dependency licences are not examined**, and the report says so
+rather than leaving the reader to assume they were; there is no batch licence lookup, and querying
+a registry per package would cost hundreds of requests inside a single scan.
+
+The dependency check is the only analysis that reaches the network, so it is off by default in the
+library, on in the app, and disabled with `pnpm scan --offline`. When it cannot reach OSV it
+reports unavailable rather than failing the scan — an unreachable database is not a clean bill of
+health.
+
+A section with no analyzer renders as **"not analysed yet"** rather than being hidden. An absent
+section reads as a clean bill of health, and only one of those is true.
+`ScanResult.analysedDimensions` records which dimensions an analyzer actually ran for, because a
+dimension that ran and found nothing produces output identical to one that never looked.

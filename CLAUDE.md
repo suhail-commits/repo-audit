@@ -154,20 +154,34 @@ pnpm typecheck       # covers packages AND apps/web
 Additionally, **if a signal, index, or the scorer changed**:
 
 ```bash
-pnpm scan .          # authorship ~18, health ~7; see below for which signals may fire
-pnpm sweep           # median ~6, max under 30, nothing claiming `certain`
+pnpm scan .          # authorship ~17, health ~3, security ~29; see below for which signals fire
+pnpm sweep           # median ~5, max under 30, nothing claiming `certain`
 ```
 
 `pnpm scan .` is the fastest real check that exists, but it is **no longer a "everything must read
-0.00" check** — two signals legitimately fire on this repository and knowing which is the point:
+0.00" check** — four signals legitimately fire on this repository and knowing which is the point:
 
 - `agent-tooling` **1.00** — `CLAUDE.md` is right there. Correct, and the reason the signal exists.
-- `commit-size` **~0.80** — the median commit here really is around 500 lines. A true measurement.
+- `commit-size` **~0.74** — the median commit here really is around 465 lines. A true measurement.
+- `unauthenticated-routes` **1.00** — `POST /api/scans` really is open to anyone, by design. It is
+  the only state-changing route in the repo, so the ratio is 1/1. A true measurement of a
+  deliberate choice.
+- `missing-license` **1.00** — there is no `LICENSE` file in this repository and `package.json`
+  declares none. Also a true measurement. **Security lands around 29 here and that is the
+  baseline**, not a bug; it was 21 before the licence checks landed.
 
-`build-velocity` reports **unavailable** here, and that is the correct answer: this repo's history
-is one active day, and one day is a point rather than a span.
+`build-velocity` reports **unavailable** here (one active day is a point, not a span), so does
+`license-mismatch`, which needs both a licence file and a declaration to compare, and so does
+`refactor-ratio` — twenty commits over two days is too short a history to have refactored anything.
+**That last one is load-bearing:** this repository's median commit deletes only 8.5% of what it
+changes, against 33–50% across the whole hand-written corpus, so without the maturity guard it
+would fire at nearly full value on our own code.
 
-**Anything beyond those two firing is a false positive to investigate.**
+**Anything beyond those four firing is a false positive to investigate.**
+
+`pnpm sweep --emit-baseline` additionally prints `CORPUS_BASELINE` as pasteable source. **Run it
+whenever a signal is added or changed** — a new signal redistributes weight across every score, so
+the distribution the report compares against goes stale even though nothing about the corpus moved.
 
 ### Deciding versus asking
 
@@ -287,7 +301,7 @@ analyzers read from shared indexes. Analyzers are pure functions of an `Analysis
 
 | Tier | Languages | Signals |
 |---|---|---|
-| full | JS/TS (oxc) | all 15 |
+| full | JS/TS (oxc) | all 16 |
 | structural | Python (tree-sitter) | clones, obvious comments, test assertions, swallowed errors, + history |
 | structural | Go, Rust (tree-sitter) | clones, obvious comments, + history |
 | history | everything else | trailers, commit shape, velocity, platform |
@@ -325,11 +339,12 @@ pnpm report <path> --persona=founder     # the narrated report
 pnpm web                                 # Next.js dev server
 ```
 
-**`pnpm scan .` on this repo is the fastest sanity check.** Authorship lands around 18 and health
-around 7, with `agent-tooling` and `commit-size` the only signals that should be above zero, and
-`build-velocity` correctly reporting unavailable — see *The gate* for why. A **third** signal firing
-on our own hand-written code is a false positive to investigate, not a result; that check has
-already caught two real bugs.
+**`pnpm scan .` on this repo is the fastest sanity check.** Authorship lands around 17, health
+around 3 and security around 29, with exactly four signals above zero — `agent-tooling`,
+`commit-size`, `unauthenticated-routes` and `missing-license` — and `build-velocity`,
+`license-mismatch` and `refactor-ratio` correctly reporting unavailable. See *The gate* for why each
+is a true measurement. A **fifth** signal firing on our own hand-written code is a false positive to
+investigate, not a result; that check has already caught two real bugs.
 
 ---
 
@@ -353,7 +368,16 @@ pasting their own repo and getting an obviously wrong answer. Its first run foun
 false positives, all listed below. Clones are full, not shallow — a shallow clone compresses the
 active-day span and makes `build-velocity` fire spuriously.
 
-Current baseline: **median 6, max 27 across 20 repos, none above 30, none claiming `certain`.**
+Current baseline: **median 5, max 25 across 20 repos, none above 30, none claiming `certain`.**
+The median moved 6 → 5 when `refactor-ratio` landed: a sixteenth signal redistributes weight across
+every score, so absolute numbers shift even where nothing about an existing signal changed.
+
+The sweep also prints **every security finding in full rather than a count**, because the corpus is
+a far better oracle for security than for anything else. For authorship it can only show a signal
+stays quiet on hand-written code; for secrets it is close to a true-negative proof, since a live
+credential in one of the most-read repositories in open source would have been revoked years ago.
+**Any security finding on the sweep is a bug in us until proven otherwise** — the current baseline
+is *clean across all 20*, and the one finding it ever produced was our own false positive.
 
 The max moved 19 → 28 when `agent-tooling` landed, and that is a correct result rather than a
 regression: `colinhacks/zod` and `remeda/remeda` both carry committed agent configuration, and
@@ -383,6 +407,13 @@ Each of these cost real debugging time.
   trying to bundle a binary. It reaches the deployment via `outputFileTracingIncludes`.
 - **Node's `child_process` rejects arguments containing NUL bytes.** `git log --pretty=format:`
   separators must use git's own `%x00` escapes rather than literal control characters.
+- **`vitest.config.ts` covered only `packages/*`.** A test written beside web code was collected by
+  nothing and passed by default — the same shape as `pnpm typecheck` silently skipping the whole web
+  app. The include list is now `packages/*` **and** `apps/*`.
+- **Next 16 refuses a second `next dev` for the same directory**, so there is no "start another one
+  on a spare port" while yours is running. Separately, editing a workspace package mid-request makes
+  HMR re-evaluate server modules between a `POST /api/scans` and the `GET /scan/<id>` that follows,
+  and the report 404s. It is not the in-memory store being broken — let the edits settle and retry.
 - **On Windows, `pkill -f` does not kill node processes.** Use `taskkill` via PowerShell, and
   verify the process is gone — stale processes running old code produce confusing results.
 - **GitHub API requests are the scarce resource, not time.** Unauthenticated is 60/hour *total*.
@@ -480,8 +511,69 @@ Each was a confidently-wrong result that looked correct until tested against rea
   to read a convention the signal was blind to, **not** to raise the threshold until the number
   went away.
 
+- **Every `pages/api` route counted as state-changing.** Next's Pages API has no per-verb export,
+  so `RouteTable` records it as `method: "ALL"` — and `ALL` was in `unauthenticated-routes`'
+  mutating set. Seen on `colinhacks/zod`, whose `packages/docs/pages/api/_og.tsx` renders an Open
+  Graph *image* and was reported as an unprotected state-changing route. **The only security
+  finding the twenty-repo sweep has ever produced, and it was ours.** An `ALL` route now counts
+  only when its body mentions a mutating verb, which is how such a handler decides what to do.
+
+- **Every transitive package read as shipped production code.** `devOnly` was decided by asking
+  whether a name appeared in a `package.json` — which is true of no transitive package at all, so
+  they all defaulted to "ships". `esbuild` and `vite`, which reach this repository only through
+  `vitest`, were reported as production dependencies. Fixed by walking pnpm's `importers:` roots
+  through the `snapshots:` edges. **This is the whole difference between a useful dependency check
+  and `npm audit`.**
+
+- **The lockfile graph walk silently found nothing.** The snapshot-key pattern was `/^ {2}…/`,
+  which matches *at least* two leading spaces — so the four-space `dependencies:` line matched it
+  too, was taken for a package key, and skipped. Not one edge was ever recorded, the walk reached
+  only direct dependencies, and every transitive package fell through to the default. **Nothing
+  threw and no test failed.** When anchoring on indentation, anchor both ends: `/^ {2}(?! )/`.
+
+- **`splitNpmSpec` read the wrong `@`.** pnpm writes `next@16.3.0(react@19.2.8)`, and taking the
+  last `@` of the raw string lands *inside* the peer suffix, producing the package name
+  `next@16.3.0(react`. Most entries in a real pnpm lockfile became names OSV would never match,
+  with nothing to indicate a problem. Strip the parenthesised suffix first.
+
+- **Clone detection reported one-line helpers as duplication.** `MIN_NODES` was 18 for JS/TS, and an
+  annotated TypeScript one-liner reaches about 19 named nodes once its parameter types, return type
+  and any inner arrow are counted. So **all eight Code health findings on this repository were pairs
+  of trivial guards** — `isTestFile` and `isGeneratedPath`, both `return PATTERNS.some((p) =>
+  p.test(relPath))`; `importsOf` and `importersOf`; `authorshipBand` and `healthBand`. Each really
+  is the same shape, and saying so is useless. Raised to **30**, matching Go and Rust, which were
+  already there for exactly this reason. This repo drops 15 duplicated functions to 2 and the
+  survivor is genuine; the corpus max moves 25 → 24, so real clones are still found. **Found by
+  reading the report this tool writes about itself** — no test failed and no sweep number was out of
+  range.
+
+- **Our own documented workaround read as an unused dependency.** `tree-sitter-wasms` is loaded
+  through a specifier assembled at runtime — `["tree-sitter-wasms","out",name].join("/")` — because
+  handing Turbopack a literal makes it try to bundle a `.wasm`. That produces no import record, so
+  `unused-dependencies` flagged it. `unusedDependencies` now also accepts packages named in a string
+  literal anywhere in the source, **matched with a surrounding quote**: a bare `includes(name)` would
+  match `ms` inside "items" and "forms", and short package names are common.
+
+- **A committed private key was invisible.** `deploy/id_rsa` has no extension and matched nothing
+  in `isRelevantFile`, so the file was never indexed and the secret scanner could not see the one
+  thing it most exists to find. `.pem`, `.key` and the `id_*` filenames are now read.
+
+- **`LICENSE` was never indexed either.** Same shape as the key above, found while building the
+  licence checks rather than after shipping them: no extension, in no filename list, so
+  `isRelevantFile` rejected it and the file never reached `FileIndex`. Had the check shipped first,
+  it would have reported "no licence" on every repository in existence and looked like a working
+  signal doing its job. `isLicenseFile` now matches `LICENSE`/`LICENCE`/`COPYING`/`NOTICE` with an
+  empty, `.md`, `.txt` or `.rst` extension — **constrained on extension deliberately**, or a source
+  file named `license.ts` becomes the project's terms. **Second instance of "the file the check most
+  exists to read is the one the index cannot see".** When adding a check, confirm its input is
+  indexed before trusting that it found nothing.
+
 The pattern: **a signal that cannot see something reports its absence as a finding.** When adding a
 signal, ask what it looks like on a codebase that legitimately does things differently.
+
+A second pattern, all four of the dependency bugs above: **a parser that silently produces nothing
+looks exactly like a repository with nothing to find.** Every one of them passed the type checker
+and the test suite. What caught them was printing the intermediate values and reading them.
 
 ## Investigated and rejected
 
@@ -497,6 +589,31 @@ Kept so nobody spends the afternoon again.
   *total* churn must exclude them; the median one does not need to.
 - **`commit-size` firing on this repository is not a bug.** The median commit here really is
   ~500 lines. Leave it.
+- **Two of GitClear's three findings do not survive as per-repository signals.** GitClear's 211M-line
+  study is the best external validation this project has — code-block duplication up ~8× and
+  error-masking constructs up 47% independently confirm `duplicate-logic` and `swallowed-errors`.
+  Three more of its findings looked portable. **Measured across all 20 sweep repos before building
+  anything, two are not:**
+  - **Early rework** (share of a file's initial lines deleted again within 14 days) reads **0.003 to
+    0.814 on hand-written code** — `colinhacks/zod` 0.814, `debug-js/debug` 0.565, `ai/nanoid` 0.536
+    against `remeda` 0.027 and `p-limit` 0.003. There is no threshold that keeps zod quiet and still
+    ever fires. GitClear saw a 3.1% → 5.7% shift *in aggregate across millions of commits*; at
+    single-repository scale the quantity is dominated by how the project happens to work.
+  - **Reuse density** (internal `ImportGraph` edges per JS/TS source file) reads **0.00 on
+    `debug-js/debug`** — a hand-written library sitting at the maximally-generated end of the scale,
+    because it is CommonJS and `require()` produces no static import records. The same blind spot as
+    every other entry here: *a signal that cannot see something reports its absence as a finding.*
+    Not shippable without CJS resolution.
+  - **Refactor ratio** (`deleted / churn` of the median commit) is the one that holds: **0.333–0.500
+    across all 20**, tightly clustered, with 9 of them at 0.40–0.50. But **this repository reads
+    0.085**, far below the corpus floor — truthfully, because it is 20 commits over two days and has
+    had no occasion to delete anything yet. So it needs a maturity guard in the shape of
+    `build-velocity`'s: a project too young to have refactored is a point, not a measurement.
+  **Also measured and discarded: a cross-file "moved lines" estimator** — `min(shed, gained)` within
+  a commit — reads **exactly 0.000 on all 20** at the median, because most multi-file commits are
+  net-additive in every file they touch. Its aggregate form varies (0.015–0.256) but divides by
+  *total* churn, which is the lockfile trap recorded above.
+
 - **A `doc-style` signal cannot be validated with the corpus we have.** README tells were measured
   across all 18 sweep repos before building anything. Every candidate fires on hand-written work:
   `sindresorhus/execa` has emoji on **50%** of its README bullets, `encode/httpx` runs 3.64
@@ -514,18 +631,50 @@ Kept so nobody spends the afternoon again.
 
 ## Current state
 
-Built and passing (142 tests): GitHub API ingest, index layer, 15 authorship signals plus an
-8-signal health dimension (calibrated),
+Built and passing (244 tests): GitHub API ingest, index layer, 16 authorship signals, an 8-signal
+health dimension (calibrated), a 7-signal security dimension,
 tiered multi-language analysis, scoring, narrator with three personas, and a Vercel-ready web app
 that scans inline with no worker or queue.
+
+**The report shows all three sections at once, and the landing page asks nothing but the
+repository.** It used to open with a three-way picker — vibe check, security, or code health — which
+never controlled which analyzers ran (a scan always produces all three; the indexes are shared) and
+only chose which section the page opened on. So it was a question with no wrong answer, asked before
+anyone had seen the product, whose sole effect was to hide two thirds of an answer already computed.
+`ScanRecord.focus` is still written and still validated on read, because rows carry it; nothing
+reads it to decide anything.
+
+With three sections on one page the repeated furniture became the bulk of it, so **the directory
+ranking, the raw metrics and the per-check breakdown live behind one `<details>` per section**. The
+two rankings in particular came out nearly identical — health borrows the same per-file data
+authorship measured — so the same six folders printed twice in a slightly different order.
+`RepoInfo.headSha` and the facts strip at the top exist because nothing said *which revision* was
+analysed: the same project read 11,436 lines locally and 7,519 through the API on one afternoon,
+because one had unpushed commits, and the page gave the reader no way to account for it.
+
+**The report ranks across sections and says where a score lands.** `NarratedReport.priorities` is
+the shortlist above the sections — every actionable finding from all three dimensions, ordered by
+severity then confidence, **one entry per rule** and capped at five. The dedupe is what makes it
+useful: clone detection emits one finding per family, and without it four of five slots read
+"near-identical copies of the same function" and four different problems fell off the list. It
+ranks and filters findings the analyzers already emitted; it never originates one.
+
+`CORPUS_BASELINE` (`packages/shared/src/corpus.ts`) carries the sweep's score distribution so the
+report can answer "is 21 a lot?". **Generated by `pnpm sweep --emit-baseline`, never hand-edited** —
+a hand-maintained copy drifts from the corpus it claims to describe and nothing fails when it does.
+Two rules bind the prose in `packages/rules/src/corpus.ts`: it always says *hand-written*
+repositories, because that is the only population the corpus samples, and it never turns a standing
+into a verdict. Security scores 0 across all twenty, so that dimension has **no spread at all** and
+gets a different sentence — run through the ordinary branches, any finding whatsoever printed
+"higher than any of the 20 we compared against", which is "you have at least one finding" dressed
+up as a percentile.
 
 **The report is three dimensions**: `authorship` (the vibe check), `security`, `health`. `health`
 absorbed what were separate `quality` and `architecture` dimensions — they asked the same question
 and split into two thin sections instead of one substantial one.
 
-`authorship` and `health` both carry a score; `security` has no analyzer. **Both scores run the
-same direction — higher means more of what was measured**, so the health bars still sum to the
-health score. Inverting health so 85 reads as "healthy" would make the bars sum to `100 − score`
+All three dimensions carry a score, and **all three run the same direction — higher means more of
+what was measured**, so the health bars still sum to the health score. Inverting health so 85 reads as "healthy" would make the bars sum to `100 − score`
 and cost the breakdown its whole argument. The band words carry the direction instead
 (`solid` / `minor issues` / `rough` / `poor`).
 
@@ -535,7 +684,48 @@ feed health as *defects*. **`analyzeHealth` borrows the `Signal` objects from th
 and replaces only their weights** — recomputing would double the cost of clone hashing and, worse,
 would let the same measurement print two different numbers in two sections.
 
-Not built: the security analyzer — no rule emits a `security` finding yet — and BYOK.
+**Security signals are presence-shaped, and that is the one deliberate departure** from how the
+other two dimensions work. Every authorship and health signal is a ratio, because those questions
+are proportional. Security is not: one committed AWS key in a 500-file repo is a ratio of 0.002,
+which scores ~0 and renders as *solid*. So `hardcoded-secrets` and `committed-env` saturate on
+their first hit and the count lives in the finding. `unauthenticated-routes` stays a real
+proportion — "half the mutating routes are open" differs from "one is" — and `dangerous-calls` and
+`vulnerable-dependencies` ramp, because every large dependency tree carries some advisory.
+
+The consequence is a jumpier score than the other sections have, so **the section headline comes
+from the worst finding, not the score**: 8/100 with a live credential is still critical.
+
+Each dimension owns its band words, and security's label a *quantity* rather than a verdict
+(`nothing found` / `some` / `several` / `widespread`). Borrowing health's would print "solid" beside
+a leaked key; the authorship words, which security used by default, printed **"21 out of 100 —
+unlikely"** on the scale — an answer to a question nobody asked. The judgement lives in the
+headline, which is why the scale is free to describe only how much was measured.
+
+`vulnerable-dependencies` is the only analysis in the engine that reaches the network, so it is
+**off by default** and opted into by the CLI (`pnpm scan`, disable with `--offline`) and the web
+app. Registered either way: switched off it reports unavailable rather than vanishing, so its
+weight is not silently redistributed.
+
+**Licensing lives inside Security**, as `missing-license` and `license-mismatch`, rather than as a
+fourth dimension — it is the same kind of question (what does this repository expose that its owner
+may not know about?) and a fourth tab would have needed its own band vocabulary to say very little.
+Both are offline: a text fingerprint over the licence file, compared against the `license` field of
+the shallowest `package.json` or `Cargo.toml`. **The other half of the question is not answered.**
+Dependency licences would cost one registry request per package — hundreds inside a single scan,
+with no batch API to avoid it — so the scan emits a warning saying so rather than leaving the
+reader to assume they were checked.
+
+**Two shareable surfaces.** `GET /api/badge/<owner>/<repo>.svg` renders the authorship score as a
+README badge — hand-written SVG, no shields.io call and no dependency, since a badge service would
+put someone else's uptime in front of every README carrying one. It **never triggers a scan**: an
+`<img>` is fetched by every crawler and preview renderer that touches the page, so a repository
+nobody has scanned gets a badge saying exactly that. And `ScanResult.moduleGraph` drives a module
+map in the report, aggregated to directories from edges `ImportGraph` already resolved, capped at
+12 nodes with the remainder counted out loud. Both are **one neutral colour, never a status ramp** —
+colouring a high authorship score red would assert that AI-generated code is bad, and the badge is
+the most quotable surface here.
+
+Not built: BYOK.
 `ScanResult.analysedDimensions` names the dimensions an analyzer actually ran for, so the report
 can render an unbuilt section as "not analysed yet" instead of as a pass. **Add a dimension to
 that array in the same commit that registers its analyzer**; a section that ran and found nothing
