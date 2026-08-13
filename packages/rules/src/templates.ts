@@ -116,6 +116,39 @@ export const RULE_TEMPLATES: Record<string, RuleTemplate> = {
     },
   },
 
+  "swallowed-errors": {
+    title: (d) => `${num(d, "discarded")} error handlers discard the error`,
+    founder: {
+      body: (d) =>
+        `${num(d, "discarded")} of ${num(d, "total")} places that catch a failure either do nothing ` +
+        `with it or only print it. In each case the rest of the app is told the operation succeeded.`,
+      detail: () => [
+        "This is the shape of bug that is hardest to chase later: something quietly does not work, and there is no error anywhere to explain why.",
+      ],
+    },
+    engineer: {
+      body: (d) =>
+        `${num(d, "discarded")}/${num(d, "total")} catch blocks are empty or log-only. ` +
+        `Failures are suppressed rather than handled.`,
+      detail: (d) => {
+        const documented = num(d, "documented");
+        return documented > 0
+          ? [
+              `${documented} empty handler(s) carrying an explanatory comment were excluded — a deliberate swallow is not this finding.`,
+            ]
+          : ["Rethrow, return a result type, or handle the failure."];
+      },
+    },
+    acquirer: {
+      body: (d) =>
+        `${num(d, "discarded")} of ${num(d, "total")} error paths suppress the failure. ` +
+        `Faults surface as incorrect behaviour rather than as errors, which lengthens diagnosis.`,
+      detail: (_d, f) => [
+        `Remediation: ${duration(f.estimatedFixMinutes ?? 60)}.`,
+      ],
+    },
+  },
+
   "unused-dependencies": {
     title: (d) => `${countOf(num(d, "count"), "unused dependency", "unused dependencies")}`,
     founder: {

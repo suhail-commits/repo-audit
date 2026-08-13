@@ -139,6 +139,14 @@ const LABELS: Record<string, LabelEntry> = {
     },
     technical: { label: "tautological-tests" },
   },
+  "swallowed-errors": {
+    plain: {
+      label: "Errors caught and ignored",
+      explains:
+        "Code that catches a failure then does nothing with it, or only prints it. The caller is told everything worked.",
+    },
+    technical: { label: "swallowed-errors" },
+  },
   "test-coverage": {
     plain: {
       label: "How much has tests",

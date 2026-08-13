@@ -34,6 +34,10 @@ import { ramp, unavailable, type AnalysisContext } from "../context";
  */
 export const WEIGHTS = {
   "duplicate-logic": 3,
+  // Worth more here than to authorship: a discarded failure is a bug waiting
+  // to be un-diagnosable, which matters more than what it suggests about who
+  // wrote it.
+  "swallowed-errors": 2.5,
   "orphan-files": 2,
   "tautological-tests": 2,
   "unused-dependencies": 1.5,
@@ -45,6 +49,7 @@ export const WEIGHTS = {
 /** The signals health borrows from the authorship pass, by id. */
 export const SHARED_SIGNAL_IDS = [
   "duplicate-logic",
+  "swallowed-errors",
   "orphan-files",
   "tautological-tests",
   "unused-dependencies",
@@ -76,7 +81,14 @@ export function analyzeHealth(
 
   const signals: Signal[] = [...borrowed, testCoverageSignal(ctx)];
 
-  return { score: scoreDimension("health", signals) };
+  return {
+    score: scoreDimension("health", signals, {
+      // The borrowed signals carry their per-file data across the re-weighting,
+      // so health gets the same ranking for free — under its own weights, which
+      // is the point of re-weighting rather than reusing the score.
+      sourceFiles: ctx.files.sourceFiles().map((f) => f.relPath),
+    }),
+  };
 }
 
 /**
