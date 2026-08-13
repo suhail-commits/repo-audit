@@ -127,6 +127,44 @@ export interface Signal {
   evidence: string[];
   /** Set when available is false, explaining what was missing. */
   unavailableReason?: string;
+  /**
+   * Which files this signal implicates, keyed by repo-relative path, 0..1.
+   *
+   * **Sparse — only files with a non-zero value appear.** Most files are not
+   * implicated by most signals, so recording every file would multiply the
+   * stored result by the file count for no information.
+   *
+   * **A plain object, not a `Map`.** `ScanResult` is `JSON.stringify`d into
+   * Postgres, and a `Map` serialises to `{}` — which would work in development,
+   * where the fallback store keeps the live object, and silently lose every
+   * per-file value in production.
+   *
+   * Absent on signals that are repo-wide by nature: a commit trailer or a
+   * committed `CLAUDE.md` says something about the repository, not about any
+   * particular file, and inventing a per-file value for them would be a
+   * fabricated measurement.
+   */
+  perFile?: Readonly<Record<string, number>>;
+}
+
+/**
+ * A directory the file-attributable signals point at, for the report's
+ * "where the signs are strongest" ranking.
+ *
+ * **Deliberately carries no 0-100 score.** Only some signals can attribute to a
+ * file, so a directory number could never reconcile with the dimension score
+ * above it — two numbers on one page that cannot be compared is worse than one
+ * number and an ordering. `intensity` is relative within this list only.
+ */
+export interface DirectoryRank {
+  /** Repo-relative directory path, POSIX separators, no trailing slash. */
+  path: string;
+  /** Source files counted under it. */
+  files: number;
+  /** 0..1, normalised against the strongest directory in the same list. */
+  intensity: number;
+  /** Signal ids that implicated this directory, strongest first. */
+  signals: string[];
 }
 
 export interface DimensionScore {
@@ -137,6 +175,18 @@ export interface DimensionScore {
   signals: Signal[];
   /** Human-readable list of what could not be measured. */
   unavailable: string[];
+  /**
+   * Where the file-attributable signals concentrate, strongest first.
+   *
+   * Empty when no available signal carries per-file data — the honest answer
+   * for a repository whose evidence is all history-shaped — and must render as
+   * "no ranking" rather than as an empty chart.
+   *
+   * **Optional because scans stored before this existed do not have it.**
+   * `ScanResult` is persisted as jsonb and read back by the report, so a
+   * required field here would be a claim about rows that predate it.
+   */
+  hotspots?: DirectoryRank[];
 }
 
 /**
