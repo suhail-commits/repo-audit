@@ -1,5 +1,7 @@
 import type { Confidence, Dimension, DimensionScore, Signal } from "@vibe/shared";
 
+import { computeHotspots } from "./hotspots";
+
 export interface ScoreOptions {
   /**
    * Signals whose firing is ground truth rather than inference.
@@ -8,6 +10,14 @@ export interface ScoreOptions {
    * no longer alter confidence — see below.
    */
   groundTruthSignals?: string[];
+  /**
+   * Every source file in the repository, repo-relative.
+   *
+   * Needed to rank directories by *density* rather than volume — without the
+   * denominators, a big directory outranks a bad one. Omit it and the score is
+   * computed exactly as before with no hotspots.
+   */
+  sourceFiles?: string[];
 }
 
 /**
@@ -24,8 +34,6 @@ export function scoreDimension(
   signals: Signal[],
   options: ScoreOptions = {},
 ): DimensionScore {
-  void options;
-
   const available = signals.filter((s) => s.available);
   const totalWeight = signals.reduce((sum, s) => sum + s.weight, 0);
   const availableWeight = available.reduce((sum, s) => sum + s.weight, 0);
@@ -67,8 +75,13 @@ export function scoreDimension(
     .filter((s) => !s.available)
     .map((s) => s.unavailableReason ?? `${s.id} unavailable`);
 
-  return { dimension, score, confidence, signals, unavailable };
+  const hotspots = options.sourceFiles
+    ? computeHotspots(signals, { sourceFiles: options.sourceFiles })
+    : [];
+
+  return { dimension, score, confidence, signals, unavailable, hotspots };
 }
 
 // Band thresholds live in @vibe/shared so the CLI and the report prose agree.
 export { authorshipBand, type AuthorshipBand } from "@vibe/shared";
+export { computeHotspots, directoryOf } from "./hotspots";

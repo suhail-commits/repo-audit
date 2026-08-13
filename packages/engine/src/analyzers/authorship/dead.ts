@@ -164,6 +164,8 @@ export function orphanFileSignal(ctx: AnalysisContext): Signal {
             `${orphans.length} of ${candidates.length} source files are never imported and are not framework entry points`,
             `Examples: ${orphans.slice(0, 5).join(", ")}`,
           ],
+    // Binary by nature: a file is reachable or it is not.
+    perFile: Object.fromEntries(orphans.map((p) => [p, 1])),
   };
 }
 

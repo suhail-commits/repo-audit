@@ -173,16 +173,31 @@ export function conventionDriftSignal(ctx: AnalysisContext): Signal {
 
   const scored: { label: string; minority: number; detail: string }[] = [];
 
+  /*
+   * Which files went against the grain, and on how many dimensions.
+   *
+   * The signal's own value only needs the minority *ratio*, but "this file
+   * disagrees with its neighbours" is exactly a per-file statement, and the
+   * classification loop already has the file in hand. Tracked as
+   * dissents-over-applicable per file so the hotspot ranking can point at the
+   * files that actually drift rather than at the directory that happens to
+   * hold the most code.
+   */
+  const dissents = new Map<string, number>();
+  const applicableTo = new Map<string, number>();
+
   for (const dimension of active) {
     const counts = new Map<Choice, number>();
-    let applicable = 0;
+    const choiceByFile = new Map<string, Choice>();
 
     for (const { file, parsed } of sourceFiles) {
       const choice = dimension.classify(parsed, file.content);
       if (choice === null) continue;
-      applicable++;
+      choiceByFile.set(file.relPath, choice);
       counts.set(choice, (counts.get(choice) ?? 0) + 1);
     }
+
+    const applicable = choiceByFile.size;
 
     // Too few files to judge means unmeasured. A single choice across many files
     // means measured and perfectly consistent — a real zero, not a missing value.
@@ -191,6 +206,13 @@ export function conventionDriftSignal(ctx: AnalysisContext): Signal {
     const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
     const majority = sorted[0]!;
     const minorityRatio = 1 - majority[1] / applicable;
+
+    for (const [relPath, choice] of choiceByFile) {
+      applicableTo.set(relPath, (applicableTo.get(relPath) ?? 0) + 1);
+      if (choice !== majority[0]) {
+        dissents.set(relPath, (dissents.get(relPath) ?? 0) + 1);
+      }
+    }
 
     scored.push({
       label: dimension.label,
@@ -225,6 +247,15 @@ export function conventionDriftSignal(ctx: AnalysisContext): Signal {
     );
   }
 
+  const perFile: Record<string, number> = {};
+  for (const [relPath, count] of dissents) {
+    const applicable = applicableTo.get(relPath) ?? 0;
+    // Share of the dimensions this file could be judged on where it went its
+    // own way. A file measured on one dimension and dissenting on it is not as
+    // strong a signal as one dissenting on four of four, and this says so.
+    if (applicable > 0) perFile[relPath] = count / applicable;
+  }
+
   return {
     id,
     // Some disagreement is normal in any real codebase; sustained disagreement
@@ -233,5 +264,6 @@ export function conventionDriftSignal(ctx: AnalysisContext): Signal {
     weight: WEIGHT,
     available: true,
     evidence,
+    perFile,
   };
 }
