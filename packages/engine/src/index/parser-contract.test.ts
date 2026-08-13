@@ -18,7 +18,7 @@ describe("oxc parser contract", () => {
   it("emits standard ESTree node type names", () => {
     const { program } = parseSync(
       "a.ts",
-      `const x = a.b(1);\nfunction f() {}\nconst g = () => {};\nclass C { m() {} }`,
+      `const x = a.b(1);\nfunction f() {}\nconst g = () => {};\nclass C { m() {} }\ntry { f(); } catch (e) {}`,
     );
 
     const types = new Set<string>();
@@ -49,6 +49,10 @@ describe("oxc parser contract", () => {
       "FunctionDeclaration",
       "ArrowFunctionExpression",
       "ClassDeclaration",
+      // `swallowed-errors` dispatches on this. A rename would make it report
+      // zero discarded handlers on every repository — silently clean.
+      "TryStatement",
+      "CatchClause",
     ]) {
       expect(types, `node type "${expected}" is no longer emitted`).toContain(
         expected,

@@ -21,7 +21,7 @@ import { detectFrameworks } from "./index/frameworks";
 import { GitIndex } from "./index/git";
 import { ImportGraph } from "./index/imports";
 import { profileLanguages } from "./index/language";
-import { PythonIndex } from "./index/python";
+import { StructuralIndex } from "./index/structural";
 import { RouteTable } from "./index/routes";
 
 export interface ScanOptions extends AuthorshipOptions {
@@ -53,16 +53,16 @@ export async function buildContext(
 ): Promise<AnalysisContext> {
   const files = await FileIndex.build(rootPath);
   const asts = AstIndex.build(files);
-  const [git, python] = await Promise.all([
+  const [git, structural] = await Promise.all([
     options.git ? Promise.resolve(options.git) : GitIndex.build(rootPath),
-    PythonIndex.build(files),
+    StructuralIndex.build(files),
   ]);
   const graph = ImportGraph.build(files, asts, rootPath);
   const routes = RouteTable.build(files, asts);
   const frameworks = detectFrameworks(files);
   const languages = profileLanguages(files.sourceFiles());
 
-  return { files, asts, python, git, graph, routes, frameworks, languages };
+  return { files, asts, structural, git, graph, routes, frameworks, languages };
 }
 
 export async function scanRepository(
@@ -82,7 +82,7 @@ export async function scanRepository(
   const warnings = [
     ...ctx.files.warnings,
     ...ctx.asts.warnings,
-    ...ctx.python.warnings,
+    ...ctx.structural.warnings,
     ...ctx.git.warnings,
     ...ctx.routes.warnings,
     ...tierWarnings(ctx),
@@ -217,12 +217,32 @@ function tierWarnings(ctx: AnalysisContext): string[] {
   const out: string[] = [];
   const { shares, unparsed } = ctx.languages;
 
+  /*
+   * The structural tier is not one thing. Python's test and error conventions
+   * are wired in; Go's and Rust's are not, because `assert_eq!` and
+   * `if err != nil` look nothing like the constructs those signals match.
+   * Saying "analyzed structurally" for all of them would claim checks that did
+   * not run, so the warning names what each language actually got.
+   */
+  const FULL_STRUCTURAL: readonly string[] = ["python"];
+
   const structural = shares.filter((s) => s.tier === "structural");
-  if (structural.length > 0) {
+  const deep = structural.filter((s) => FULL_STRUCTURAL.includes(s.language));
+  const shallow = structural.filter((s) => !FULL_STRUCTURAL.includes(s.language));
+
+  if (deep.length > 0) {
     out.push(
-      `${structural.map((s) => s.label).join(", ")} was analyzed structurally — ` +
+      `${deep.map((s) => s.label).join(", ")} was analyzed structurally — ` +
         `duplication, comment style and test assertions only. ` +
         `Import-graph and framework checks need JavaScript or TypeScript.`,
+    );
+  }
+
+  if (shallow.length > 0) {
+    out.push(
+      `${shallow.map((s) => s.label).join(", ")} was analyzed for duplication and ` +
+        `comment style only. Test-assertion and error-handling checks are written ` +
+        `against JavaScript, TypeScript and Python conventions and were not run.`,
     );
   }
 

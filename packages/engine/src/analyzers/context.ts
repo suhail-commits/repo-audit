@@ -6,7 +6,7 @@ import type { FrameworkInfo } from "../index/frameworks";
 import type { GitIndex } from "../index/git";
 import type { ImportGraph } from "../index/imports";
 import type { LanguageProfile } from "../index/language";
-import type { PythonIndex } from "../index/python";
+import type { StructuralIndex } from "../index/structural";
 import type { RouteTable } from "../index/routes";
 
 /**
@@ -18,7 +18,8 @@ export interface AnalysisContext {
   /** JS/TS semantic trees. Empty for a repository with no JS/TS. */
   asts: AstIndex;
   /** Python structural trees. Empty for a repository with no Python. */
-  python: PythonIndex;
+  /** tree-sitter trees for languages oxc cannot parse. */
+  structural: StructuralIndex;
   git: GitIndex;
   graph: ImportGraph;
   routes: RouteTable;

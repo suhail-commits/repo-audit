@@ -39,6 +39,11 @@ const REPOS = [
   "tkem/cachetools",
   "astanin/python-tabulate",
   "encode/httpx",
+  // Go and Rust. Both were history-tier until the structural index learned
+  // their grammars, and their clone thresholds are the least-validated numbers
+  // in the engine — these two are what validates them.
+  "spf13/cobra",
+  "BurntSushi/ripgrep",
 ];
 
 const ROOT =

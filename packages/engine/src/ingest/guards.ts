@@ -66,8 +66,15 @@ export const JS_TS_EXTENSIONS = new Set([
   ".cjs",
 ]);
 
-/** Extensions parsed structurally by tree-sitter. */
-export const STRUCTURAL_EXTENSIONS = new Set([".py", ".pyi"]);
+/**
+ * Extensions parsed structurally by tree-sitter.
+ *
+ * Only languages whose node names are wired into the structural signals and
+ * which have been swept against a real repository. `tree-sitter-wasms` ships
+ * thirty-odd grammars that load fine; loading is not the same as analysing
+ * correctly.
+ */
+export const STRUCTURAL_EXTENSIONS = new Set([".py", ".pyi", ".go", ".rs"]);
 
 /**
  * Everything treated as source code.
@@ -79,8 +86,6 @@ export const STRUCTURAL_EXTENSIONS = new Set([".py", ".pyi"]);
 export const CODE_EXTENSIONS = new Set([
   ...JS_TS_EXTENSIONS,
   ...STRUCTURAL_EXTENSIONS,
-  ".go",
-  ".rs",
   ".java",
   ".cs",
   ".rb",
@@ -179,6 +184,12 @@ const TEST_PATH_PATTERNS = [
   // Python conventions: pytest collects test_*.py and *_test.py.
   /(^|[/\\])test_[^/\\]*\.pyi?$/i,
   /_test\.pyi?$/i,
+  // Go: `*_test.go` is enforced by the toolchain itself, so it is about as
+  // canonical as a test convention gets. Seen on `spf13/cobra`, where every
+  // single clone family was in a `_test.go` file and `duplicate-logic` read
+  // 0.80 on a well-regarded hand-written library. Fifth instance of the same
+  // mistake as the bare `test.js`, top-level `test/` and `tsd` cases.
+  /_test\.go$/i,
   /(^|[/\\])conftest\.pyi?$/i,
   /(^|[/\\])__tests__[/\\]/i,
   /(^|[/\\])__mocks__[/\\]/i,
