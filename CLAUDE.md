@@ -154,21 +154,20 @@ pnpm typecheck       # covers packages AND apps/web
 Additionally, **if a signal, index, or the scorer changed**:
 
 ```bash
-pnpm scan .          # authorship ~26, health ~10; see below for which signals may fire
+pnpm scan .          # authorship ~18, health ~7; see below for which signals may fire
 pnpm sweep           # median ~6, max under 30, nothing claiming `certain`
 ```
 
 `pnpm scan .` is the fastest real check that exists, but it is **no longer a "everything must read
-0.00" check** — three signals legitimately fire on this repository and knowing which is the point:
+0.00" check** — two signals legitimately fire on this repository and knowing which is the point:
 
 - `agent-tooling` **1.00** — `CLAUDE.md` is right there. Correct, and the reason the signal exists.
-- `commit-size` **1.00** and `build-velocity` **1.00** — this repo's history is short and dense
-  (one active day, one author, thousands of lines), which is genuinely the shape those signals
-  look for.
+- `commit-size` **~0.80** — the median commit here really is around 500 lines. A true measurement.
 
-**Anything beyond those three firing is a false positive to investigate.** `build-velocity` at 1.00
-off a single active day is a weakness worth revisiting — lines-per-day computed over one day is not
-a rate — but that is a signal change and needs deciding, not patching mid-task.
+`build-velocity` reports **unavailable** here, and that is the correct answer: this repo's history
+is one active day, and one day is a point rather than a span.
+
+**Anything beyond those two firing is a false positive to investigate.**
 
 ### Deciding versus asking
 
@@ -288,9 +287,22 @@ analyzers read from shared indexes. Analyzers are pure functions of an `Analysis
 
 | Tier | Languages | Signals |
 |---|---|---|
-| full | JS/TS (oxc) | all 13 |
-| structural | Python (tree-sitter) | clones, obvious comments, test assertions, + history |
+| full | JS/TS (oxc) | all 15 |
+| structural | Python (tree-sitter) | clones, obvious comments, test assertions, swallowed errors, + history |
+| structural | Go, Rust (tree-sitter) | clones, obvious comments, + history |
 | history | everything else | trailers, commit shape, velocity, platform |
+
+**The structural tier is not one thing.** Python's test and error conventions are wired in; Go's
+and Rust's are not, because `assert_eq!` and `if err != nil` look nothing like the constructs those
+signals match. `tierWarnings()` in `scan.ts` says which of the two a language got — claiming
+"analyzed structurally" for all of them would promise checks that never ran.
+
+**A grammar that loads is not a language that is analysed.** `tree-sitter-wasms` ships thirty-odd
+grammars and every obvious one loads fine under the pinned ABI. What makes a language supported is
+its node names being wired into `GRAMMAR_SHAPES` in `clones.ts` and a real repository in it being
+swept — `collectStructuralFunctionShapes` returns nothing for a language with no table, because a
+shape built from unrecognised node types hashes consistently and would report confident,
+meaningless duplication.
 
 **Any signal that depends on JS/TS-only machinery must check for it and report
 unavailable.** `orphan-files` needs `ImportGraph`, which has no Python edges — judging Python
@@ -313,11 +325,11 @@ pnpm report <path> --persona=founder     # the narrated report
 pnpm web                                 # Next.js dev server
 ```
 
-**`pnpm scan .` on this repo is the fastest sanity check.** Authorship lands around 26 and health
-around 10, with `agent-tooling`, `commit-size` and `build-velocity` the only signals that should be
-above zero — see *The gate* for why each of those is legitimate. A **fourth** signal firing on our
-own hand-written code is a false positive to investigate, not a result; that check has already
-caught two real bugs.
+**`pnpm scan .` on this repo is the fastest sanity check.** Authorship lands around 18 and health
+around 7, with `agent-tooling` and `commit-size` the only signals that should be above zero, and
+`build-velocity` correctly reporting unavailable — see *The gate* for why. A **third** signal firing
+on our own hand-written code is a false positive to investigate, not a result; that check has
+already caught two real bugs.
 
 ---
 
@@ -341,7 +353,7 @@ pasting their own repo and getting an obviously wrong answer. Its first run foun
 false positives, all listed below. Clones are full, not shallow — a shallow clone compresses the
 active-day span and makes `build-velocity` fire spuriously.
 
-Current baseline: **median 6, max 28, none above 30, none claiming `certain`.**
+Current baseline: **median 6, max 27 across 20 repos, none above 30, none claiming `certain`.**
 
 The max moved 19 → 28 when `agent-tooling` landed, and that is a correct result rather than a
 regression: `colinhacks/zod` and `remeda/remeda` both carry committed agent configuration, and
@@ -431,6 +443,18 @@ Each was a confidently-wrong result that looked correct until tested against rea
   to import a type test; `tsd` reads them directly. Fourth entry in the same family as the bare
   `test.js` and top-level `test/` cases: **a test convention we do not recognise becomes a finding
   about dead code.**
+- **Go's `_test.go` files counted as authored source.** The `_test\.pyi?$` pattern was
+  Python-only, so Go's toolchain-enforced suffix matched nothing. Seen on `spf13/cobra`: *every*
+  clone family was in a `_test.go` file and `duplicate-logic` read **0.80** on a well-regarded
+  hand-written library. After the fix, 594 functions drop to 205 and the surviving families are
+  genuine — three parallel shell-completion generators. Fifth instance of the same mistake.
+- **Rust's inline `#[cfg(test)]` modules counted as source.** Path-based test detection cannot see
+  tests that live at the bottom of the module they test, which is Rust's dominant convention. Seen
+  on `BurntSushi/ripgrep`, where table-shaped test functions inside genuine source files
+  (`crates/core/flags/defs.rs`) drove `duplicate-logic` to 0.57. Clone detection now skips items
+  annotated `#[cfg(test)]` / `#[test]`; 1,524 functions drop to 1,010. **Attributes are siblings of
+  the item they annotate, not children**, so this walks ordered children rather than using
+  `collectNamed`.
 - **No HTTP route was ever found in a monorepo.** Both Next patterns were anchored to the scan
   root (`/^(?:src\/)?app\/…/`), so `apps/web/src/app/api/scans/route.ts` matched nothing. Seen on
   `suhail-commits/repo-audit` — this tool reported 0 routes in its own repository, which has one.
@@ -438,16 +462,60 @@ Each was a confidently-wrong result that looked correct until tested against rea
   `test/`. The segment is now matched anywhere in the path, still exactly (`my-app/` does not
   match). **This one hid for a long time because nothing consumed the route count** — it surfaced
   only when the Security section started printing it.
+- **`build-velocity` was a rate with neither a real numerator nor a real denominator.** It divided
+  `files.totalSloc` — the repo's size *today* — by the number of days that happened to carry a
+  commit, so a two-year project with commits on 40 distinct days reported `totalSloc / 40` as a
+  daily rate. And `Math.max(1, activeDays)` turned a single day into a divisor. Seen on
+  `suhail-commits/repo-audit`: hand-written across one dense day, it read 1.00 and carried the
+  score to 26. Now measures `Commit.linesAdded` and reports unavailable below 3 active days.
+  **Every other signal already guarded its sample size; this one guarded only its numerator**
+  (`sloc < 200`). When adding a ratio, guard both ends.
+
+- **`swallowed-errors` read deliberate swallows as careless ones.** `catch (_err) {}` is the
+  near-universal convention for "considered and dropped" — it is ESLint's own default for
+  intentionally-unused bindings. Seen on `colinhacks/zod`, whose benchmarks time the throwing path
+  that way: 28 of 59 handlers counted as discarded, the signal read 0.72, and the repo hit **30/100
+  — the exact number this project calls a bug rather than a result**. Underscore bindings now count
+  as declared intent, the same as a comment inside the handler; zod drops to 1 of 59. The fix was
+  to read a convention the signal was blind to, **not** to raise the threshold until the number
+  went away.
 
 The pattern: **a signal that cannot see something reports its absence as a finding.** When adding a
 signal, ask what it looks like on a codebase that legitimately does things differently.
+
+## Investigated and rejected
+
+Kept so nobody spends the afternoon again.
+
+- **Lockfile churn does not distort `commit-size`.** `index/git.ts` sums every file into `churn`
+  with no filtering, so a regenerated `pnpm-lock.yaml` counts. Measured across all 18 sweep repos:
+  excluding lockfiles and generated paths changed the signal value by **0.000 everywhere**. Median
+  commit churn is 6–63 lines on every one of them, far below the 80-line ramp floor, so the outlier
+  commits lockfiles inflate never move the median. That is what a median is for.
+  **But the aggregate effect is enormous** — 88% of `ai/nanoid`'s total churn is lockfile or
+  generated output, 68% of `vercel/ms`, 67% of `pmndrs/zustand`. Any future signal using *mean* or
+  *total* churn must exclude them; the median one does not need to.
+- **`commit-size` firing on this repository is not a bug.** The median commit here really is
+  ~500 lines. Leave it.
+- **A `doc-style` signal cannot be validated with the corpus we have.** README tells were measured
+  across all 18 sweep repos before building anything. Every candidate fires on hand-written work:
+  `sindresorhus/execa` has emoji on **50%** of its README bullets, `encode/httpx` runs 3.64
+  superlatives per 1,000 words, `remeda/remeda` hits 4 of 7 boilerplate headings. The one tell that
+  looks clean — emoji in headings, 0% across all 18 — is clean because the corpus is eighteen
+  utility libraries by a handful of authors, not because emoji headings are rare in hand-written
+  READMEs. Three of the repos have no real README at all.
+  **The deeper problem is that the corpus is one-sided.** It can show a signal stays quiet on
+  hand-written code; it cannot show one fires on generated code, because there is no labelled
+  AI-written corpus here. For structural signals the synthetic fixtures cover that side. For prose
+  they cannot. Shipping would mean shipping a signal whose true-positive behaviour was never
+  measured, aimed at the single most-read file in a repository.
 
 ---
 
 ## Current state
 
-Built and passing (113 tests): GitHub API ingest, index layer, 14 authorship signals plus a
-7-signal health dimension (calibrated),
+Built and passing (142 tests): GitHub API ingest, index layer, 15 authorship signals plus an
+8-signal health dimension (calibrated),
 tiered multi-language analysis, scoring, narrator with three personas, and a Vercel-ready web app
 that scans inline with no worker or queue.
 
