@@ -700,96 +700,132 @@ button:disabled {
   margin: 0 0 var(--sp-3);
 }
 
-/* The one line saying whether anything needs doing. Sits under the summary in
-   the opening block, so it needs to outrank `.verdict p` to stay distinct from
-   the repository description above it. */
-.verdict .verdict-line,
-.verdict-line {
-  margin: var(--sp-4) 0 0;
-  font-size: var(--step-1);
-  color: var(--text);
-  max-width: var(--measure);
+/* ---- where the signs concentrate ----
+   A ranking, so the bars carry position and no number is printed beside them.
+   One series measuring magnitude: a single hue varying by length, never a
+   colour per directory. Each row also names the checks behind it, so identity
+   never depends on seeing the bar. */
+
+.hotspots {
+  margin-top: var(--sp-6);
 }
 
-/* ---- the question they asked ---- */
-
-.focus-note {
-  margin: var(--sp-7) 0 0;
-  color: var(--text-muted);
-  font-size: var(--step--1);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.focus-note strong {
-  color: var(--text);
-  font-weight: 600;
-}
-
-/* ---- the two sections they did not ask about ----
-   Collapsed, never dropped. The summary carries the headline fact so the
-   outcome is legible without opening anything — which matters most for
-   "not analysed yet", the one a reader must not mistake for a pass. */
-
-.also-checked {
-  margin: var(--sp-7) 0 var(--sp-3);
+.hotspots h4 {
   font-size: var(--step--1);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-muted);
   font-weight: 500;
+  margin: 0 0 var(--sp-3);
 }
 
-.dimension-collapsed {
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  margin-bottom: var(--sp-3);
+.hotspot-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  counter-reset: hotspot;
 }
 
-.dimension-collapsed > summary {
-  display: flex;
+.hotspot {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 6rem auto;
   align-items: center;
   gap: var(--sp-3);
-  padding: var(--sp-4);
-  cursor: pointer;
-  list-style: none;
+  padding: var(--sp-2) 0;
 }
 
-.dimension-collapsed > summary::-webkit-details-marker {
-  display: none;
+.hotspot-path {
+  font-family: var(--mono);
+  font-size: var(--step--1);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
 }
 
-.dimension-collapsed > summary:hover {
-  background: var(--surface-alt);
-  border-radius: var(--radius);
+/* Prose, not a path — it should not look like something you can copy. */
+.hotspot-path-root {
+  font-family: inherit;
+  font-style: italic;
 }
 
-.dimension-collapsed[open] > summary {
+.hotspot-track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--surface-sunken);
+  overflow: hidden;
+}
+
+.hotspot-fill {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.hotspot-files {
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.hotspot-foot {
+  margin: var(--sp-3) 0 0;
+  color: var(--text-muted);
+  font-size: var(--step--1);
+  max-width: var(--measure);
+}
+
+@media (max-width: 559px) {
+  /* The path needs the full width once the bar and count no longer fit beside
+     it; stacking keeps the ordering readable rather than truncating paths. */
+  .hotspot {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .hotspot-track {
+    grid-column: 1 / -1;
+    order: 3;
+  }
+}
+
+/* ---- which check is on screen ----
+   The report shows one dimension, the one that was asked for. Every dimension
+   is still computed, so this is how the other two stay reachable — without it a
+   scan would produce three answers and permanently show one. */
+
+.focus-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin: var(--sp-6) 0 var(--sp-5);
   border-bottom: 1px solid var(--border);
-  border-radius: var(--radius) var(--radius) 0 0;
 }
 
-.dimension-collapsed-title {
+.focus-switch a {
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: var(--step--1);
+  margin-bottom: -1px;
+}
+
+.focus-switch a:hover {
+  color: var(--text);
+}
+
+.focus-switch a[aria-current="true"] {
+  color: var(--text);
+  border-bottom-color: var(--accent);
   font-weight: 600;
 }
 
-/* Right-aligned, and in muted ink rather than an accent — it is a fact about
-   the section, not a status badge. */
-.dimension-collapsed-state {
-  margin-left: auto;
+/* Said on the tab itself, not only inside the section. A reader deciding which
+   tab to open should know one of them has no analyzer before spending the
+   click on it. */
+.focus-switch-state {
   color: var(--text-muted);
-  font-family: var(--mono);
-  font-size: var(--step--1);
-  text-align: right;
-}
-
-/* Nested inside a details, so it drops the top border and the numbered head
-   the summary already provides. */
-.dimension.dimension-nested {
-  padding: var(--sp-5);
-  margin-bottom: 0;
-  border-top: 0;
+  font-weight: 400;
 }
 
 /* ---- dimension sections ----

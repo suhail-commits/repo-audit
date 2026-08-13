@@ -68,3 +68,72 @@ export function dimensionLabel(
 ): DimensionLabel {
   return LABELS[dimension][persona];
 }
+
+/**
+ * Heading for the directory ranking, per dimension and persona.
+ *
+ * Phrased as *where the signs are*, never as a verdict about the folder. The
+ * ranking is relative and built from a subset of the checks, so wording that
+ * implied a folder had been scored would be claiming more than was measured.
+ */
+const HOTSPOT_TITLES: Record<Dimension, Record<Persona, string>> = {
+  authorship: {
+    founder: "Where the signs are strongest",
+    engineer: "Signal concentration by directory",
+    acquirer: "Where generated code concentrates",
+  },
+  health: {
+    founder: "Where the problems concentrate",
+    engineer: "Defect concentration by directory",
+    acquirer: "Where remediation would focus",
+  },
+  security: {
+    founder: "Where the risk concentrates",
+    engineer: "Exposure concentration by directory",
+    acquirer: "Where exposure concentrates",
+  },
+};
+
+export function hotspotTitle(dimension: Dimension, persona: Persona): string {
+  return HOTSPOT_TITLES[dimension][persona];
+}
+
+/**
+ * The opening line for a dimension that has no analyzer.
+ *
+ * The report shows one dimension at a time, so the page headline has to come
+ * from *that* dimension. Falling back to the authorship headline printed
+ * "Authorship 14/100 — unlikely to be AI-generated" at the top of the Security
+ * page, which is a confident answer to a question nobody asked and no answer at
+ * all to the one they did.
+ */
+export function notAnalysedHeadline(
+  dimension: Dimension,
+  persona: Persona,
+): string {
+  const title = LABELS[dimension][persona].title;
+  if (persona === "engineer") return `${title}: no analyzer registered.`;
+  return `We haven't built the ${title.toLowerCase()} checks yet.`;
+}
+
+/**
+ * The caveat under the ranking.
+ *
+ * `count` is computed from the signals that actually contributed, not written
+ * as a constant: `write-once-files` is unavailable on any scan sourced from the
+ * GitHub API, so the same repository legitimately ranks on fewer checks there
+ * than it does from a local checkout.
+ */
+export function hotspotCaveat(count: number, persona: Persona): string {
+  const one = count === 1;
+  if (persona === "engineer") {
+    return (
+      `Ordering only, from the ${count} ${one ? "check" : "checks"} that ` +
+      `attribute per file. Not a per-directory score.`
+    );
+  }
+  return (
+    `Based on the ${count} ${one ? "check" : "checks"} that ${one ? "works" : "work"} ` +
+    `file by file. It shows the order, not a score for each folder.`
+  );
+}

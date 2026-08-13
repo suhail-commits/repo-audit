@@ -17,4 +17,10 @@ export {
   labelledSignalIds,
   type SignalLabel,
 } from "./signal-labels";
-export { dimensionLabel, type DimensionLabel } from "./dimension-labels";
+export {
+  dimensionLabel,
+  hotspotTitle,
+  hotspotCaveat,
+  notAnalysedHeadline,
+  type DimensionLabel,
+} from "./dimension-labels";

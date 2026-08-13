@@ -1,4 +1,8 @@
-import { TemplateNarrator, dimensionLabel } from "@vibe/rules";
+import {
+  TemplateNarrator,
+  dimensionLabel,
+  notAnalysedHeadline,
+} from "@vibe/rules";
 import type { NarratedFinding, NarratedScore } from "@vibe/rules";
 import {
   DIMENSIONS,
@@ -9,6 +13,7 @@ import {
   type ScanResult,
 } from "@vibe/shared";
 
+import { Hotspots } from "@/components/Hotspots";
 import { ScoreScale } from "@/components/ScoreScale";
 import { SignalBreakdown } from "@/components/SignalBreakdown";
 
@@ -68,8 +73,16 @@ export function Report({
     narrated: report.scores.find((s) => s.dimension === dimension),
   });
 
-  const lead = sectionOf(focus);
-  const rest = DIMENSIONS.filter((d) => d !== focus).map(sectionOf);
+  /*
+   * One section, the one that was asked for.
+   *
+   * The scan computes every dimension regardless — the indexes are shared, so
+   * skipping an analyzer would save almost nothing — but the page answers the
+   * question that was put to it and nothing else. The switcher below is what
+   * keeps the rest reachable: without it a scan would compute three answers and
+   * permanently show one, with re-scanning the only way to see the others.
+   */
+  const shown = sectionOf(focus);
 
   return (
     <main>
@@ -84,7 +97,7 @@ export function Report({
               <a
                 key={option}
                 // Carry the focus through, or switching persona would silently
-                // reorder the report back to its default section.
+                // send the reader back to the default section.
                 href={`/scan/${scanId}?persona=${option}&focus=${focus}`}
                 aria-current={option === persona}
               >
@@ -94,6 +107,21 @@ export function Report({
           </nav>
         </div>
       </div>
+
+      <nav className="focus-switch" aria-label="Which check to show">
+        {DIMENSIONS.map((option) => (
+          <a
+            key={option}
+            href={`/scan/${scanId}?persona=${persona}&focus=${option}`}
+            aria-current={option === focus}
+          >
+            {dimensionLabel(option, persona).title}
+            {result.analysedDimensions.includes(option) ? null : (
+              <span className="focus-switch-state"> · not analysed</span>
+            )}
+          </a>
+        ))}
+      </nav>
 
       {/*
         The verdict counts findings across the whole report, so it belongs
@@ -107,47 +135,20 @@ export function Report({
           the authorship verdict above a report that opens on Code health reads
           as though the page ignored the choice.
         */}
-        <h2>{lead.narrated?.headline ?? report.headline}</h2>
+        {/*
+          The headline comes from the dimension on screen, never from a
+          fallback. Falling back to the report headline put "Authorship 14/100 —
+          unlikely to be AI-generated" at the top of the Security page: a
+          confident answer to a question nobody asked, and none to the one they
+          did.
+        */}
+        <h2>
+          {shown.narrated?.headline ?? notAnalysedHeadline(focus, persona)}
+        </h2>
         <p>{report.summary}</p>
-        <p className="verdict-line">{report.verdict}</p>
       </section>
 
-      <p className="focus-note">
-        You asked about{" "}
-        <strong>{dimensionLabel(focus, persona).title.toLowerCase()}</strong>
-      </p>
-
-      <DimensionSection {...lead} persona={persona} result={result} />
-
-      {/*
-        The other two are always present, never dropped. A section that
-        disappeared would be indistinguishable from one that ran and found
-        nothing — and for Security, from one that has no analyzer at all.
-        Collapsed rather than hidden: the summary carries the headline fact, so
-        the reader learns the outcome without opening anything.
-      */}
-      <h3 className="also-checked">Also checked</h3>
-      {rest.map((section) => (
-        <details className="dimension-collapsed" key={section.dimension}>
-          <summary>
-            <span className="dimension-index" aria-hidden="true">
-              {section.index}
-            </span>
-            <span className="dimension-collapsed-title">
-              {dimensionLabel(section.dimension, persona).title}
-            </span>
-            <span className="dimension-collapsed-state">
-              {summaryOf(section, result)}
-            </span>
-          </summary>
-          <DimensionSection
-            {...section}
-            persona={persona}
-            result={result}
-            headless
-          />
-        </details>
-      ))}
+      <DimensionSection {...shown} persona={persona} result={result} />
 
       {result.warnings.length > 0 ? (
         <div className="warnings">
@@ -177,28 +178,6 @@ interface Section {
   narrated?: NarratedScore;
 }
 
-/**
- * The one fact a collapsed section has to carry.
- *
- * Whatever this says is what most readers will take away about that dimension,
- * since a collapsed section is one most people never open. "Not analysed yet"
- * has to be as legible here as it is inside.
- */
-function summaryOf(section: Section, result: ScanResult): string {
-  if (!result.analysedDimensions.includes(section.dimension)) {
-    return "not analysed yet";
-  }
-
-  const score = result.scores.find((s) => s.dimension === section.dimension);
-  if (score) return `${score.score} / 100`;
-
-  const actionable = section.findings.filter((f) => f.severity !== "info");
-  if (actionable.length === 0) return "nothing worth flagging";
-  return actionable.length === 1
-    ? "1 thing worth a look"
-    : `${actionable.length} things worth a look`;
-}
-
 function DimensionSection({
   index,
   dimension,
@@ -206,12 +185,9 @@ function DimensionSection({
   result,
   findings,
   narrated,
-  headless = false,
 }: Section & {
   persona: Persona;
   result: ScanResult;
-  /** Nested inside a `<details>`, whose summary already names the section. */
-  headless?: boolean;
 }) {
   const label = dimensionLabel(dimension, persona);
   // The narrator carries prose; the breakdown needs the raw signals, which only
@@ -228,24 +204,19 @@ function DimensionSection({
   const analysed = result.analysedDimensions.includes(dimension);
 
   return (
-    <section
-      className={`dimension${headless ? " dimension-nested" : ""}`}
-      id={dimension}
-    >
-      {headless ? null : (
-        <div className="dimension-head">
-          <span className="dimension-index" aria-hidden="true">
-            {index}
-          </span>
-          <div className="dimension-title">
-            <h2>{label.title}</h2>
-            <p className="dimension-covers">{label.covers}</p>
-          </div>
-          {analysed ? null : (
-            <span className="dimension-state">not analysed yet</span>
-          )}
+    <section className="dimension" id={dimension}>
+      <div className="dimension-head">
+        <span className="dimension-index" aria-hidden="true">
+          {index}
+        </span>
+        <div className="dimension-title">
+          <h2>{label.title}</h2>
+          <p className="dimension-covers">{label.covers}</p>
         </div>
-      )}
+        {analysed ? null : (
+          <span className="dimension-state">not analysed yet</span>
+        )}
+      </div>
 
       {score ? (
         <div className="score-panel">
@@ -267,14 +238,6 @@ function DimensionSection({
         </div>
       ) : null}
 
-      {/*
-        The lead section's headline is already the page headline above, so only
-        the collapsed ones restate theirs.
-      */}
-      {headless && narrated ? (
-        <p className="dimension-headline">{narrated.headline}</p>
-      ) : null}
-
       {narrated && narrated.evidence.length > 0 ? (
         <ul className="evidence">
           {narrated.evidence.map((line, i) => (
@@ -282,6 +245,12 @@ function DimensionSection({
           ))}
         </ul>
       ) : null}
+
+      {/*
+        After the evidence and before the findings: it answers "where", which
+        only makes sense once the reader knows what was found.
+      */}
+      {score ? <Hotspots score={score} persona={persona} /> : null}
 
       {narrated?.caveats.map((caveat, i) => (
         <p className="caveat" key={i}>
