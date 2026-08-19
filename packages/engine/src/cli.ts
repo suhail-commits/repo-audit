@@ -20,13 +20,20 @@ async function main(): Promise<void> {
 
   if (!target) {
     console.error(
-      "usage: pnpm scan <path-to-repo | owner/repo> [--json] [--structural-only]",
+      "usage: pnpm scan <path-to-repo | owner/repo> [--json] [--structural-only] [--offline]",
     );
     process.exitCode = 1;
     return;
   }
 
   const structuralOnly = flags.has("--structural-only");
+  /*
+   * The dependency check is the only analysis that leaves the machine, so it
+   * is opt-out here and opt-in in the library. `--offline` exists because a
+   * scan should still work on a plane, and because the sweep must not make
+   * twenty rounds of network calls to measure false positives.
+   */
+  const checkVulnerabilities = !flags.has("--offline");
 
   // A local path always wins, so a directory named like a slug still scans
   // locally rather than silently hitting the network.
@@ -34,6 +41,7 @@ async function main(): Promise<void> {
     !existsSync(target) && isValidSlug(target)
       ? await scanGitHubRepository(target, {
           structuralOnly,
+          checkVulnerabilities,
           ...(process.env["GITHUB_TOKEN"]
             ? { token: process.env["GITHUB_TOKEN"] }
             : {}),
@@ -42,6 +50,7 @@ async function main(): Promise<void> {
           kind: "zip",
           name: path.basename(path.resolve(target)),
           structuralOnly,
+          checkVulnerabilities,
         });
 
   if (flags.has("--json")) {

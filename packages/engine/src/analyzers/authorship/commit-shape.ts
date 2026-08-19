@@ -1,6 +1,7 @@
 import type { Signal } from "@vibe/shared";
 
 import { clamp01, ramp, unavailable, type AnalysisContext } from "../context";
+import { countOf } from "../../format";
 
 /**
  * Distributional properties of the commit history.
@@ -110,23 +111,61 @@ export function commitMessageSignal(ctx: AnalysisContext): Signal {
   };
 }
 
+/** Below this there is no span to divide by, only a single point in time. */
+const MIN_ACTIVE_DAYS = 3;
+
+/**
+ * How fast the code arrived: lines added per author per active day.
+ *
+ * **Measured from the commits, not from the repository's current size.** Reading
+ * `files.totalSloc` and dividing by active days claims every line that exists
+ * today was written on one of those days, which is false for any repository
+ * older than its commit sample: a two-year project with commits on 40 distinct
+ * days reported `totalSloc / 40` as a daily rate.
+ *
+ * The denominator is guarded for the same reason every other signal here guards
+ * its sample size. A rate needs a span; one active day is a point, and
+ * `Math.max(1, activeDays)` quietly turned that point into a divisor — which is
+ * why this repository, hand-written over a single dense day, read 1.00.
+ */
 export function buildVelocitySignal(ctx: AnalysisContext): Signal {
   const id = "build-velocity";
   const reason = historyGap(ctx);
   if (reason) return unavailable(id, WEIGHTS.buildVelocity, reason);
 
-  const activeDays = Math.max(1, ctx.git.activeDays());
-  const sloc = ctx.files.totalSloc;
-  if (sloc < 200) {
-    return unavailable(id, WEIGHTS.buildVelocity, "codebase too small to judge");
+  const activeDays = ctx.git.activeDays();
+  if (activeDays < MIN_ACTIVE_DAYS) {
+    return unavailable(
+      id,
+      WEIGHTS.buildVelocity,
+      `only ${countOf(activeDays, "active day")} of commits — a rate needs a longer span`,
+    );
   }
 
-  const slocPerDay = sloc / activeDays;
+  /*
+   * `linesAdded` rather than `files[].added`, and deliberately not gated on
+   * `statsComplete`. That flag means "we have every commit's *file list*",
+   * which `write-once-files` genuinely needs and this does not — gating on it
+   * made the signal unavailable on every GitHub-sourced scan, which is every
+   * scan the deployed product performs.
+   */
+  const linesAdded = ctx.git.commits.reduce((sum, c) => sum + c.linesAdded, 0);
+  if (linesAdded === 0) {
+    return unavailable(
+      id,
+      WEIGHTS.buildVelocity,
+      "line counts are unavailable from this history source",
+    );
+  }
+  if (linesAdded < 200) {
+    return unavailable(id, WEIGHTS.buildVelocity, "too little code written to judge");
+  }
+
   const authors = ctx.git.authors().length;
 
   // A team legitimately produces more per day; normalize so a 5-person team is
   // not flagged for the output of 5 people.
-  const perAuthorPerDay = slocPerDay / Math.max(1, authors);
+  const perAuthorPerDay = linesAdded / activeDays / Math.max(1, authors);
 
   return {
     id,
@@ -134,7 +173,7 @@ export function buildVelocitySignal(ctx: AnalysisContext): Signal {
     weight: WEIGHTS.buildVelocity,
     available: true,
     evidence: [
-      `${sloc.toLocaleString()} lines of source across ${activeDays} day(s) of commits`,
+      `${linesAdded.toLocaleString()} lines added across ${countOf(activeDays, "day")} of commits`,
       `Roughly ${Math.round(perAuthorPerDay).toLocaleString()} lines per author per active day`,
       authors === 1
         ? "Single contributor across the entire history"
@@ -178,6 +217,14 @@ export function writeOnceFilesSignal(ctx: AnalysisContext): Signal {
     evidence: [
       `${writeOnce.length} of ${touched.size} files (${Math.round(ratio * 100)}%) were created once and never edited again`,
     ],
+    /*
+     * Binary per file, and absent entirely on GitHub-sourced scans: this signal
+     * already reports unavailable when `statsComplete` is false, which the API
+     * path always is because it returns no filenames. The hotspot ranking is
+     * built from whichever signals are available, so it simply has one fewer
+     * contributor there rather than a gap it does not know about.
+     */
+    perFile: Object.fromEntries(writeOnce.map((p) => [p, 1])),
   };
 }
 
@@ -186,7 +233,7 @@ function historyGap(ctx: AnalysisContext): string | null {
     return ctx.git.unavailableReason ?? "git history unavailable";
   }
   if (ctx.git.commitCount < MIN_COMMITS) {
-    return `only ${ctx.git.commitCount} commit(s) in history`;
+    return `only ${countOf(ctx.git.commitCount, "commit")} in history`;
   }
   return null;
 }

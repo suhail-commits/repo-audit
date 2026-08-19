@@ -1,4 +1,4 @@
-import type { Confidence } from "./types";
+import type { Confidence, Signal } from "./types";
 
 /**
  * Plain-English band for an authorship score.
@@ -67,10 +67,78 @@ export function healthBand(score: number): HealthBand {
 }
 
 /** The scale a dimension is drawn on, or none if it does not carry a score. */
+export type SecurityBand = "none" | "some" | "several" | "widespread";
+
+/**
+ * How much exposure was found — a quantity, never a verdict.
+ *
+ * The wording is the careful part. Security signals are presence-shaped, so a
+ * single committed credential saturates one check out of five and lands the
+ * score around twenty. Borrowing the health words would print **"solid"** on
+ * the same screen as a live AWS key, and the authorship words — which this
+ * dimension used by default — printed **"21 out of 100 — unlikely"**, which
+ * answers a question nobody asked.
+ *
+ * So these label the *amount measured* and leave the judgement to the headline,
+ * which is taken from the worst finding precisely because the number cannot
+ * carry it. "some" above a critical finding is a statement about how much was
+ * found, and does not contradict "this needs fixing today".
+ */
+export const SECURITY_BANDS: readonly {
+  band: SecurityBand;
+  from: number;
+  label: string;
+}[] = [
+  { band: "none", from: 0, label: "nothing found" },
+  { band: "some", from: 15, label: "some" },
+  { band: "several", from: 40, label: "several" },
+  { band: "widespread", from: 70, label: "widespread" },
+];
+
 export function bandsFor(
   dimension: string,
 ): readonly { from: number; label: string }[] {
-  return dimension === "health" ? HEALTH_BANDS : AUTHORSHIP_BANDS;
+  if (dimension === "health") return HEALTH_BANDS;
+  if (dimension === "security") return SECURITY_BANDS;
+  return AUTHORSHIP_BANDS;
+}
+
+/** One signal's share of a dimension's score, in points out of 100. */
+export interface SignalContribution {
+  signal: Signal;
+  /** What this signal actually contributed. Zero when unavailable. */
+  points: number;
+  /** What it *could* have contributed at value 1.0 — its share of the weight. */
+  maxPoints: number;
+}
+
+/**
+ * Split a dimension's score into per-signal points that sum back to it.
+ *
+ * The arithmetic is the report's central argument — "here is the number, and
+ * here is it adding up" — so it lives in one place rather than beside each
+ * surface that prints it. The web breakdown and the CLI both read this; two
+ * copies would let the same repository print two different numbers, which is
+ * the failure `analyzeHealth` already avoids by borrowing authorship's
+ * `Signal` objects instead of measuring again.
+ *
+ * Weight is normalised over *available* signals only, which is invariant 2
+ * expressed as arithmetic: an unavailable signal contributes nothing and its
+ * weight is redistributed, rather than counting as a zero.
+ */
+export function contributions(signals: readonly Signal[]): SignalContribution[] {
+  const totalWeight = signals
+    .filter((s) => s.available)
+    .reduce((sum, s) => sum + s.weight, 0);
+
+  return signals.map((signal) => {
+    const maxPoints = totalWeight > 0 ? (signal.weight / totalWeight) * 100 : 0;
+    return {
+      signal,
+      points: signal.available ? maxPoints * signal.value : 0,
+      maxPoints,
+    };
+  });
 }
 
 /** How a confidence level should be described to a reader. */

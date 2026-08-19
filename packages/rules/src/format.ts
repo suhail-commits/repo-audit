@@ -27,6 +27,28 @@ export function percent(ratio: number): string {
   return `${Math.round(ratio * 100)}%`;
 }
 
+/**
+ * How to describe a set of function names that may not be describable.
+ *
+ * The clone template asserted "under different names (…)" unconditionally, and
+ * on a real report it produced two different kinds of nonsense: **"under
+ * different names (`<anonymous>`)"** for arrow functions, which have no names to
+ * differ, and **"under different names (get)"** for three methods all called
+ * `get`, whose names are identical.
+ *
+ * Returns an empty string when there is nothing true to say, so the caller can
+ * simply leave the clause out. Naming the copies is a nicety; the finding is
+ * that they exist.
+ */
+export function namesClause(names: readonly string[]): string {
+  const real = names.filter((n) => n !== "" && !n.startsWith("<"));
+  const distinct = [...new Set(real)];
+
+  if (real.length < 2) return "";
+  if (distinct.length === 1) return `, all called \`${distinct[0]}\``;
+  return `, under different names (${list(distinct)})`;
+}
+
 /** Minutes to a phrase a non-engineer can act on. */
 export function duration(minutes: number): string {
   if (minutes < 60) return `about ${Math.max(5, Math.round(minutes / 5) * 5)} minutes`;

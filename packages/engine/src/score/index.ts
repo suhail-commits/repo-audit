@@ -1,5 +1,7 @@
 import type { Confidence, Dimension, DimensionScore, Signal } from "@vibe/shared";
 
+import { computeHotspots } from "./hotspots";
+
 export interface ScoreOptions {
   /**
    * Signals whose firing is ground truth rather than inference.
@@ -8,6 +10,30 @@ export interface ScoreOptions {
    * no longer alter confidence — see below.
    */
   groundTruthSignals?: string[];
+  /**
+   * Every source file in the repository, repo-relative.
+   *
+   * Needed to rank directories by *density* rather than volume — without the
+   * denominators, a big directory outranks a bad one. Omit it and the score is
+   * computed exactly as before with no hotspots.
+   */
+  sourceFiles?: string[];
+  /**
+   * The repository was too large to read in full.
+   *
+   * **The largest missing input there is, and for a long time it did not reach
+   * the score at all.** `FileIndex.truncated` produced a warning string and
+   * nothing else, so a repository where a fifth of the files were read reported
+   * the same confidence as one read completely — every signal "available",
+   * coverage 100%, `high`.
+   *
+   * It caps confidence rather than scaling it, because the honest quantity is
+   * unknown: the walk stops when a cap is hit, so we never learn how many files
+   * were left. A ratio would be a fabricated denominator. What we can say
+   * truthfully is that we do not know how much we missed, and `low` is the
+   * word for that.
+   */
+  truncated?: boolean;
 }
 
 /**
@@ -24,8 +50,6 @@ export function scoreDimension(
   signals: Signal[],
   options: ScoreOptions = {},
 ): DimensionScore {
-  void options;
-
   const available = signals.filter((s) => s.available);
   const totalWeight = signals.reduce((sum, s) => sum + s.weight, 0);
   const availableWeight = available.reduce((sum, s) => sum + s.weight, 0);
@@ -63,12 +87,32 @@ export function scoreDimension(
   else if (coverage >= 0.5) confidence = "medium";
   else confidence = "low";
 
+  /*
+   * Signal coverage measures how many *checks* ran. It says nothing about how
+   * much of the repository they ran over, and on a truncated scan those are
+   * very different numbers — every signal reports available because each one
+   * genuinely ran, over a fraction of the files.
+   */
+  if (options.truncated) confidence = "low";
+
   const unavailable = signals
     .filter((s) => !s.available)
     .map((s) => s.unavailableReason ?? `${s.id} unavailable`);
 
-  return { dimension, score, confidence, signals, unavailable };
+  if (options.truncated) {
+    unavailable.push(
+      "the repository was too large to read in full, so every check below ran " +
+        "over part of it",
+    );
+  }
+
+  const hotspots = options.sourceFiles
+    ? computeHotspots(signals, { sourceFiles: options.sourceFiles })
+    : [];
+
+  return { dimension, score, confidence, signals, unavailable, hotspots };
 }
 
 // Band thresholds live in @vibe/shared so the CLI and the report prose agree.
 export { authorshipBand, type AuthorshipBand } from "@vibe/shared";
+export { computeHotspots, directoryOf } from "./hotspots";

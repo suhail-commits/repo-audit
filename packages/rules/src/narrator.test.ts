@@ -1,18 +1,35 @@
-import { buildContext, analyzeAuthorship, analyzeHealth } from "@vibe/engine";
+import {
+  buildContext,
+  analyzeAuthorship,
+  analyzeHealth,
+  analyzeSecurity,
+} from "@vibe/engine";
 import { createFixtureRepo } from "@vibe/engine/testing";
-import type { Finding, ScanResult } from "@vibe/shared";
+import {
+  PERSONAS,
+  type DimensionScore,
+  type Finding,
+  type ScanResult,
+  type Signal,
+} from "@vibe/shared";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { prioritiesCaveat } from "./dimension-labels";
 import { TemplateNarrator } from "./narrator";
 import { signalLabel, labelledSignalIds } from "./signal-labels";
 import { FALLBACK_TEMPLATE, templateFor, templatedRuleIds } from "./templates";
 
 const narrator = new TemplateNarrator();
 
-let cleanup: (() => void) | undefined;
+/*
+ * A list rather than one handle: the coverage tests below build several
+ * fixtures in a single test, because no single repository can make every rule
+ * fire — `missing-license` and `license-mismatch` are mutually exclusive by
+ * construction.
+ */
+const cleanups: (() => void)[] = [];
 afterEach(() => {
-  cleanup?.();
-  cleanup = undefined;
+  for (const done of cleanups.splice(0)) done();
 });
 
 const VIBE_FILES: Record<string, string> = {
@@ -46,10 +63,55 @@ function dupHelper(name: string, sep: string): string {
 `;
 }
 
-async function findingsFor(
+/**
+ * A repository that leaves as much exposed as one fixture can.
+ *
+ * Deliberately carries no licence file, which is what makes `missing-license`
+ * fire; the mismatch case needs a licence that contradicts the manifest and so
+ * lives in its own fixture below.
+ */
+const EXPOSED_FILES: Record<string, string> = {
+  "package.json": JSON.stringify({
+    name: "exposed",
+    dependencies: { next: "^15.0.0" },
+  }),
+  /*
+   * Correctly shaped and never real — the right length and character class for
+   * the vendor, because a pattern that only matches a short placeholder proves
+   * nothing about whether it would match the thing it exists to find.
+   *
+   * **The concatenation has to happen here, not in the fixture's text.** Written
+   * as `"AKIA" + "QRST…"` inside the template literal it reaches disk with the
+   * prefix split, the scanner matches nothing, and the coverage test passes
+   * having measured no secret at all.
+   */
+  "src/config.ts": `export const accessKeyId = "${"AKIA" + "QRSTUVWX2345YZ67"}";
+export const region = "us-east-1";
+`,
+  ".env": "DATABASE_URL=postgres://admin:s3cr3tpw@db.internal:5432/prod\n",
+  "src/run.ts": "export function go(input: string) {\n  return eval(input);\n}\n",
+  "app/api/users/route.ts": `export async function DELETE(request: Request) {
+  const id = new URL(request.url).searchParams.get("id");
+  await db.users.delete(id);
+  return Response.json({ ok: true });
+}
+`,
+};
+
+/** A licence file that contradicts the manifest — the one case above cannot hold. */
+const MISLICENSED_FILES: Record<string, string> = {
+  "package.json": JSON.stringify({ name: "mislicensed", license: "MIT" }),
+  LICENSE:
+    "                    GNU AFFERO GENERAL PUBLIC LICENSE\n" +
+    "                       Version 3, 19 November 2007\n\n" +
+    "  Copyright (C) 2007 Free Software Foundation, Inc.\n",
+  "src/index.ts": "export const x = 1;\n",
+};
+
+async function contextFor(
   files: Record<string, string>,
   withGit: boolean,
-): Promise<Finding[]> {
+): Promise<Awaited<ReturnType<typeof buildContext>>> {
   const repo = withGit
     ? createFixtureRepo({
         commits: [
@@ -60,22 +122,87 @@ async function findingsFor(
         ],
       })
     : createFixtureRepo({ files, withoutGit: true });
-  cleanup = repo.cleanup;
+  cleanups.push(repo.cleanup);
 
-  const ctx = await buildContext(repo.rootPath);
+  return buildContext(repo.rootPath);
+}
+
+async function findingsFor(
+  files: Record<string, string>,
+  withGit: boolean,
+): Promise<Finding[]> {
+  const ctx = await contextFor(files, withGit);
   return analyzeAuthorship(ctx).findings;
+}
+
+/**
+ * Every rule and every signal the three analyzers emit across the fixture set.
+ *
+ * Security is included because leaving it out is exactly how a gap hides: both
+ * coverage tests below used to run `analyzeAuthorship` alone while claiming to
+ * cover every dimension, so security's seven signals and five rules were
+ * guarded by nothing.
+ *
+ * `vulnerable-dependencies` is unavoidably absent — it is the only check that
+ * reaches the network, and a coverage test must not.
+ */
+async function emitted(): Promise<{ ruleIds: string[]; signalIds: string[] }> {
+  const ruleIds = new Set<string>();
+  const signalIds = new Set<string>();
+
+  for (const [files, withGit] of [
+    [VIBE_FILES, true],
+    [EXPOSED_FILES, false],
+    [MISLICENSED_FILES, false],
+  ] as const) {
+    const ctx = await contextFor(files, withGit);
+    const authorship = analyzeAuthorship(ctx);
+    const health = analyzeHealth(ctx, authorship.score.signals);
+    const security = await analyzeSecurity(ctx);
+
+    for (const f of [...authorship.findings, ...security.findings]) {
+      ruleIds.add(f.ruleId);
+    }
+    for (const s of [
+      ...authorship.score.signals,
+      ...health.score.signals,
+      ...security.score.signals,
+    ]) {
+      signalIds.add(s.id);
+    }
+  }
+
+  return { ruleIds: [...ruleIds], signalIds: [...signalIds] };
 }
 
 describe("template coverage", () => {
   it("has a hand-written template for every rule the engine emits", async () => {
-    const findings = await findingsFor(VIBE_FILES, true);
-    const emitted = [...new Set(findings.map((f) => f.ruleId))];
+    const { ruleIds } = await emitted();
 
-    expect(emitted.length).toBeGreaterThan(0);
+    /*
+     * Named explicitly rather than merely counted, because a coverage test that
+     * only asserts "some rules fired" passes while measuring nothing. The first
+     * draft of this fixture split the AWS prefix in the file it wrote to disk,
+     * so `hardcoded-secret` never fired and the test was green anyway.
+     *
+     * `vulnerable-dependency` is absent by design — it is the only check that
+     * reaches the network, and a coverage test must not.
+     */
+    for (const required of [
+      "hardcoded-secret",
+      "committed-env-file",
+      "unauthenticated-route",
+      "dangerous-call",
+      "missing-license",
+      "license-mismatch",
+    ]) {
+      expect(ruleIds, `${required} did not fire — the fixture stopped covering it`)
+        .toContain(required);
+    }
 
     // The fallback exists for vendored scanners that emit hundreds of rule IDs.
     // Rules we author ourselves should never quietly land on it.
-    const usingFallback = emitted.filter(
+    const usingFallback = ruleIds.filter(
       (ruleId) => templateFor(ruleId) === FALLBACK_TEMPLATE,
     );
     expect(
@@ -89,27 +216,16 @@ describe("template coverage", () => {
      * Same shape as the template-coverage test above, and for the same reason:
      * without it a new signal ships showing its raw id — "write-once-files" —
      * to someone reading a report about their own repository.
+     *
+     * Covers all three scored dimensions. Checking one of them would have
+     * passed while `test-coverage` — a health-only signal — rendered as
+     * "Test coverage" from the id-humanising fallback.
      */
-    const repo = createFixtureRepo({
-      commits: [{ message: "feat: build it", files: VIBE_FILES }],
-    });
-    cleanup = repo.cleanup;
-
-    const ctx = await buildContext(repo.rootPath);
-    const authorship = analyzeAuthorship(ctx);
-    /*
-     * Every dimension that carries a score, not just authorship. Checking one
-     * of them would have passed while `test-coverage` — a health-only signal —
-     * rendered as "Test coverage" from the id-humanising fallback.
-     */
-    const emitted = [
-      ...authorship.score.signals,
-      ...analyzeHealth(ctx, authorship.score.signals).score.signals,
-    ].map((s) => s.id);
-    expect(emitted.length).toBeGreaterThan(0);
+    const { signalIds } = await emitted();
+    expect(signalIds.length).toBeGreaterThan(0);
 
     const labelled = new Set(labelledSignalIds());
-    const missing = emitted.filter((id) => !labelled.has(id));
+    const missing = signalIds.filter((id) => !labelled.has(id));
     expect(
       missing,
       `these signals have no label: ${missing.join(", ")}`,
@@ -177,6 +293,38 @@ describe("persona voice", () => {
     const a = narrator.finding(finding, "founder");
     const b = narrator.finding(finding, "founder");
     expect(a).toEqual(b);
+  });
+
+  it("fills every placeholder in the licence-mismatch prose", () => {
+    /*
+     * The template reads five keys out of `data`. A typo in any of them prints
+     * the string "undefined" into the report and nothing fails — the template
+     * coverage test only proves a template exists, not that it was given what
+     * it asks for. This is the one finding whose prose no fixture produces.
+     */
+    const finding: Finding = {
+      ruleId: "license-mismatch",
+      dimension: "security",
+      severity: "medium",
+      confidence: "high",
+      source: "builtin",
+      title: "The licence file and the manifest disagree",
+      locations: [{ file: "LICENSE" }, { file: "package.json" }],
+      data: {
+        declared: "MIT",
+        identified: "AGPL-3.0",
+        declaredIn: "package.json",
+        licenseFile: "LICENSE",
+      },
+    };
+
+    for (const persona of PERSONAS) {
+      const rendered = narrator.finding(finding, persona);
+      const text = [rendered.title, rendered.body, ...rendered.detail].join(" ");
+      expect(text, persona).not.toContain("undefined");
+      expect(text, persona).toContain("AGPL-3.0");
+      expect(text, persona).toContain("MIT");
+    }
   });
 
   it("falls back gracefully for an unknown rule", () => {
@@ -472,5 +620,265 @@ describe("score narration", () => {
     expect(
       narrator.report(result, "engineer").findings.map((f) => f.severity),
     ).toEqual(["critical", "medium", "low"]);
+  });
+});
+
+/**
+ * The shortlist exists because the report shows one dimension at a time, so a
+ * reader looking at Code health has no way to learn that the worst thing in the
+ * repository is two tabs away.
+ */
+describe("what to look at first", () => {
+  const mk = (
+    id: string,
+    severity: Finding["severity"],
+    over: Partial<Finding> = {},
+  ): Finding => ({
+    ruleId: id,
+    dimension: "authorship",
+    severity,
+    confidence: "high",
+    source: "builtin",
+    title: id,
+    locations: [],
+    data: {},
+    ...over,
+  });
+
+  function resultWith(findings: Finding[]): ScanResult {
+    return {
+      schemaVersion: 1,
+      repo: {
+        kind: "zip",
+        name: "demo",
+        rootPath: "/tmp/demo",
+        hasGitHistory: false,
+        fileCount: 20,
+        sourceFileCount: 14,
+        totalLoc: 1200,
+        frameworks: [],
+        languages: [],
+        analysisTier: "full" as const,
+      },
+      scores: [],
+      findings,
+      metrics: [],
+      analysedDimensions: ["authorship" as const],
+      durationMs: 10,
+      warnings: [],
+    };
+  }
+
+  it("crosses dimensions — the worst thing wins whichever section it is in", () => {
+    const report = narrator.report(
+      resultWith([
+        mk("dup", "medium", { dimension: "health" }),
+        mk("key", "critical", { dimension: "security" }),
+        mk("dead", "low", { dimension: "health" }),
+      ]),
+      "founder",
+    );
+
+    expect(report.priorities.map((f) => f.ruleId)).toEqual([
+      "key",
+      "dup",
+      "dead",
+    ]);
+    expect(report.priorities[0]!.dimension).toBe("security");
+  });
+
+  it("breaks a severity tie on confidence, not on how widespread it is", () => {
+    /*
+     * A guess that appears in thirty files must not outrank a fact that appears
+     * in one. Counting locations first did exactly that, which is why the
+     * comparator gained a confidence term.
+     */
+    const spread = mk("guess", "medium", {
+      confidence: "low",
+      locations: Array.from({ length: 30 }, (_, i) => ({ file: `f${i}.ts` })),
+    });
+    const sure = mk("fact", "medium", { confidence: "certain" });
+
+    const report = narrator.report(resultWith([spread, sure]), "engineer");
+    expect(report.priorities.map((f) => f.ruleId)).toEqual(["fact", "guess"]);
+  });
+
+  it("leaves out info findings — they are context, not tasks", () => {
+    const report = narrator.report(
+      resultWith([
+        mk("tooling", "info", { confidence: "certain" }),
+        mk("dup", "low"),
+      ]),
+      "founder",
+    );
+
+    expect(report.priorities.map((f) => f.ruleId)).toEqual(["dup"]);
+  });
+
+  it("is empty on a clean repo rather than padded with information", () => {
+    const report = narrator.report(
+      resultWith([mk("tooling", "info", { confidence: "certain" })]),
+      "founder",
+    );
+    expect(report.priorities).toEqual([]);
+  });
+
+  it("caps the list and says how many were left out", () => {
+    const many = Array.from({ length: 9 }, (_, i) => mk(`r${i}`, "medium"));
+    const report = narrator.report(resultWith(many), "founder");
+
+    expect(report.priorities).toHaveLength(5);
+    // The full set stays reachable below; only the shortlist is capped.
+    expect(report.findings).toHaveLength(9);
+    expect(prioritiesCaveat(5, 9, "founder")).toMatch(/4 more below/);
+  });
+
+  it("shows each rule once, so one noisy rule cannot fill the list", () => {
+    /*
+     * Clone detection emits one finding per family. On this repository four of
+     * the five slots were "near-identical copies of the same function" — the
+     * reader learns one thing, five times, while four different problems are
+     * pushed off the list.
+     */
+    const report = narrator.report(
+      resultWith([
+        mk("dup", "medium"),
+        mk("dup", "medium"),
+        mk("dup", "medium"),
+        mk("dup", "medium"),
+        mk("dead", "low"),
+        mk("untested", "low"),
+      ]),
+      "founder",
+    );
+
+    expect(report.priorities.map((f) => f.ruleId)).toEqual([
+      "dup",
+      "dead",
+      "untested",
+    ]);
+    // Nothing is hidden — the section below still carries every one of them.
+    expect(report.findings).toHaveLength(6);
+  });
+
+  it("keeps the worst instance when a rule fires more than once", () => {
+    const report = narrator.report(
+      resultWith([
+        mk("secret", "low"),
+        mk("secret", "critical"),
+        mk("secret", "medium"),
+      ]),
+      "engineer",
+    );
+
+    expect(report.priorities).toHaveLength(1);
+    expect(report.priorities[0]!.severity).toBe("critical");
+  });
+
+  it("does not truncate silently when everything fits", () => {
+    expect(prioritiesCaveat(3, 3, "founder")).not.toMatch(/more below/);
+  });
+
+  it("orders the shortlist identically to the section list", () => {
+    // Same objects, not merely equal ones — a priority and its entry in the
+    // section must never drift apart.
+    const report = narrator.report(
+      resultWith([mk("a", "low"), mk("b", "critical"), mk("c", "high")]),
+      "engineer",
+    );
+    expect(report.priorities[0]).toBe(report.findings[0]);
+  });
+});
+
+/**
+ * The security headline is the one that must not follow its own number.
+ *
+ * Its signals are presence-shaped, so a single committed credential saturates
+ * one check out of five and lands the dimension in the twenties. A band word
+ * taken from twenty-something would read "minor issues" directly above a live
+ * key. These pin the behaviour, because the first implementation simply fell
+ * through to `${dimension}: ${score}/100` and rendered "security: 21/100".
+ */
+describe("security headline", () => {
+  const signal = (id: string, available: boolean): Signal =>
+    available
+      ? { id, value: 0, weight: 1, available: true, evidence: [] }
+      : {
+          id,
+          value: 0,
+          weight: 1,
+          available: false,
+          evidence: [],
+          unavailableReason: `${id} had nothing to judge`,
+        };
+
+  const score = (value: number, availableCount: number): DimensionScore => ({
+    dimension: "security",
+    score: value,
+    confidence: "high",
+    signals: [
+      signal("a", availableCount > 0),
+      signal("b", availableCount > 1),
+      signal("c", availableCount > 2),
+    ],
+    unavailable: [],
+    hotspots: [],
+  });
+
+  const finding = (severity: Finding["severity"], title: string): Finding => ({
+    ruleId: "hardcoded-secret",
+    dimension: "security",
+    severity,
+    confidence: "certain",
+    source: "builtin",
+    title,
+    locations: [],
+    data: {},
+  });
+
+  it("leads with the worst finding, not the score", () => {
+    const narrated = narrator.score(score(8, 3), "founder", [
+      finding("low", "Something small"),
+      finding("critical", "AWS access key ID committed to the repository"),
+    ]);
+
+    expect(narrated.headline).toContain("needs fixing today");
+    expect(narrated.headline).toContain("aws access key id");
+    // The number is still 8; it must not be what sets the register.
+    expect(narrated.headline).not.toContain("8/100");
+  });
+
+  it("names the severity and count for the engineer", () => {
+    const narrated = narrator.score(score(21, 3), "engineer", [
+      finding("medium", "A route does not check the caller"),
+    ]);
+
+    expect(narrated.headline).toBe(
+      "Security 21/100 — 1 finding, worst medium (3/3 checks ran)",
+    );
+  });
+
+  it("ignores info findings when choosing the register", () => {
+    const narrated = narrator.score(score(0, 3), "founder", [
+      { ...finding("info", "Context only"), severity: "info" },
+    ]);
+
+    expect(narrated.headline).toBe("We did not find anything exposed.");
+  });
+
+  /**
+   * "Nothing found" may only sound like "nothing there" when everything ran.
+   * An unreachable vulnerability database is not a clean bill of health.
+   */
+  it("will not say clean when a check could not run", () => {
+    const narrated = narrator.score(score(0, 2), "founder", []);
+
+    expect(narrated.headline).toContain("1 of the 3 checks could not run");
+  });
+
+  it("says so plainly when every check ran and found nothing", () => {
+    const narrated = narrator.score(score(0, 3), "acquirer", []);
+
+    expect(narrated.headline).toBe("No exposure found across all checks.");
   });
 });

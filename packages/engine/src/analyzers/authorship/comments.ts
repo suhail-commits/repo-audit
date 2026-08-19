@@ -7,7 +7,7 @@ import {
   type AstNode,
   type ParsedFile,
 } from "../../index/ast";
-import { collectNamed, type PythonFile } from "../../index/python";
+import { collectNamed, type StructuralFile } from "../../index/structural";
 import { ramp, type AnalysisContext } from "../context";
 
 /**
@@ -156,9 +156,16 @@ export function scanComments(
   return { hits, considered };
 }
 
-/** Python comments, via tree-sitter. Docstrings are string nodes, not comments. */
-export function findPythonObviousComments(
-  parsed: PythonFile,
+/**
+ * Comments from any tree-sitter grammar.
+ *
+ * Portable as-is: every grammar we load names its comment node `comment`, and
+ * the "does this restate the next line" logic below works on source text rather
+ * than on syntax. Python docstrings are string nodes rather than comments, so
+ * they are correctly left out.
+ */
+export function findStructuralObviousComments(
+  parsed: StructuralFile,
   source: string,
 ): { hits: ObviousCommentHit[]; considered: number } {
   const comments = collectNamed(parsed.tree.rootNode, "comment").map((node) => ({
@@ -176,15 +183,16 @@ export function obviousCommentSignal(ctx: AnalysisContext): Signal {
   let hits = 0;
   let considered = 0;
   const examples: ObviousCommentHit[] = [];
+  const perFile: Record<string, number> = {};
 
   for (const file of ctx.files.sourceFiles()) {
     const jsTs = ctx.asts.get(file.relPath);
-    const python = ctx.python.get(file.relPath);
+    const structural = ctx.structural.get(file.relPath);
 
     const result = jsTs
       ? findObviousComments(jsTs, file.content)
-      : python
-        ? findPythonObviousComments(python, file.content)
+      : structural
+        ? findStructuralObviousComments(structural, file.content)
         : null;
     if (!result) continue;
 
@@ -192,6 +200,12 @@ export function obviousCommentSignal(ctx: AnalysisContext): Signal {
     considered += result.considered;
     for (const hit of result.hits) {
       if (examples.length < 3) examples.push(hit);
+    }
+
+    // A file's own ratio, not its share of the total: one restating comment out
+    // of two is a narrating file, one out of eighty is a stray.
+    if (result.hits.length > 0 && result.considered > 0) {
+      perFile[file.relPath] = result.hits.length / result.considered;
     }
   }
 
@@ -223,6 +237,7 @@ export function obviousCommentSignal(ctx: AnalysisContext): Signal {
     weight: WEIGHTS.obviousComments,
     available: true,
     evidence,
+    perFile,
   };
 }
 
@@ -388,7 +403,7 @@ function analyzeTestFile(parsed: ParsedFile): TestCase[] {
  * direct analogue: `mock.assert_called_once()` is a method call that passes
  * whenever the mock was configured, exactly like `toHaveBeenCalled`.
  */
-function analyzePythonTestFile(parsed: PythonFile): TestCase[] {
+function analyzePythonTestFile(parsed: StructuralFile): TestCase[] {
   const cases: TestCase[] = [];
 
   for (const fn of collectNamed(parsed.tree.rootNode, "function_definition")) {
@@ -440,14 +455,37 @@ export function tautologicalTestSignal(ctx: AnalysisContext): Signal {
   }
 
   const cases: TestCase[] = [];
+  // `TestCase` carries no path of its own, so attribution happens here, where
+  // the file is still in hand.
+  const casesByFile = new Map<string, TestCase[]>();
+
+  /*
+   * Only JS/TS and Python. Assertion style is the least portable thing in this
+   * analyzer: Go asserts by calling `t.Errorf` after a hand-written comparison,
+   * Rust by expanding `assert_eq!` macros. Neither looks anything like an
+   * `expect()` chain or a bare `assert` statement, so reading their test files
+   * with the Python matcher would find nothing and report it as "asserts
+   * nothing at all" — the exact failure this signal has produced four times
+   * already on test conventions it did not recognise.
+   */
+  let unreadable = 0;
+
   for (const file of testFiles) {
     const jsTs = ctx.asts.get(file.relPath);
-    if (jsTs) {
-      cases.push(...analyzeTestFile(jsTs));
+    const structural = ctx.structural.get(file.relPath);
+
+    if (!jsTs && structural?.language !== "python") {
+      unreadable++;
       continue;
     }
-    const python = ctx.python.get(file.relPath);
-    if (python) cases.push(...analyzePythonTestFile(python));
+
+    const found = jsTs
+      ? analyzeTestFile(jsTs)
+      : analyzePythonTestFile(structural!);
+    if (found.length === 0) continue;
+
+    cases.push(...found);
+    casesByFile.set(file.relPath, found);
   }
 
   if (cases.length < 5) {
@@ -457,7 +495,10 @@ export function tautologicalTestSignal(ctx: AnalysisContext): Signal {
       weight: WEIGHTS.tautologicalTests,
       available: false,
       evidence: [],
-      unavailableReason: "too few test cases to judge",
+      unavailableReason:
+        unreadable > 0 && cases.length === 0
+          ? `assertion style is only recognised for JavaScript, TypeScript and Python; ${unreadable} test file(s) were not read`
+          : "too few test cases to judge",
     };
   }
 
@@ -477,11 +518,22 @@ export function tautologicalTestSignal(ctx: AnalysisContext): Signal {
     );
   }
 
+  const perFile: Record<string, number> = {};
+  for (const [file, fileCases] of casesByFile) {
+    const hollow = fileCases.filter(
+      (c) =>
+        c.assertions === 0 ||
+        (c.assertions > 0 && c.mockOnlyAssertions === c.assertions),
+    ).length;
+    if (hollow > 0) perFile[file] = hollow / fileCases.length;
+  }
+
   return {
     id,
     value: ramp(ratio, 0.15, 0.6),
     weight: WEIGHTS.tautologicalTests,
     available: true,
     evidence,
+    perFile,
   };
 }

@@ -14,10 +14,37 @@ export const LIMITS = {
   /** Hard cap on files considered; beyond this the scan reports truncation. */
   maxFiles: 25_000,
   /**
-   * Hard cap on source bytes read into memory across a scan. Generous for real
-   * source trees once node_modules and build output are excluded.
+   * Hard cap on source bytes read into memory across a scan.
+   *
+   * **This is the real memory ceiling of a scan, and it was set five times too
+   * high.** The old value of 150 MB was chosen as "generous for real source
+   * trees" without measuring what a scan actually costs, and source bytes are
+   * nowhere near the peak: `FileIndex` retains every file's content as a UTF-16
+   * string, `AstIndex` holds an oxc tree per JS/TS file, `StructuralIndex`
+   * holds a tree-sitter tree per Python/Go/Rust file, and all three stay live
+   * simultaneously because analyzers may read any of them at any point.
+   *
+   * Measured with `--expose-gc` across three real repositories:
+   *
+   * | repo | indexed source | peak RSS |
+   * |---|---|---|
+   * | `sindresorhus/p-limit` | 0.2 MB | 93 MB |
+   * | `colinhacks/zod` | 3 MB | 286 MB |
+   * | `facebook/react` | 36 MB | 583 MB |
+   *
+   * That is a fixed floor near 90 MB plus roughly 14 MB of resident memory per
+   * megabyte of source. The old cap therefore permitted a scan needing over
+   * 2 GB, on a platform where the function has about 1 GB — so the gate meant
+   * to produce an honest refusal instead produced an out-of-memory kill with no
+   * message at all.
+   *
+   * 40 MB lands near 640 MB peak, leaving room for the tarball and the Next
+   * runtime, and admits `facebook/react` whole. Beyond it the walk truncates,
+   * which is now both deterministic (see `walkRepo`) and reported: a truncated
+   * scan drops every dimension's confidence to `low` rather than presenting a
+   * partial read as a complete one.
    */
-  maxTotalBytes: 150_000_000,
+  maxTotalBytes: 40_000_000,
   /** Reject archives that expand beyond this (zip-bomb guard). */
   maxExtractedBytes: 500_000_000,
   /** Reject archives with more entries than this. */
@@ -66,8 +93,15 @@ export const JS_TS_EXTENSIONS = new Set([
   ".cjs",
 ]);
 
-/** Extensions parsed structurally by tree-sitter. */
-export const STRUCTURAL_EXTENSIONS = new Set([".py", ".pyi"]);
+/**
+ * Extensions parsed structurally by tree-sitter.
+ *
+ * Only languages whose node names are wired into the structural signals and
+ * which have been swept against a real repository. `tree-sitter-wasms` ships
+ * thirty-odd grammars that load fine; loading is not the same as analysing
+ * correctly.
+ */
+export const STRUCTURAL_EXTENSIONS = new Set([".py", ".pyi", ".go", ".rs"]);
 
 /**
  * Everything treated as source code.
@@ -79,8 +113,6 @@ export const STRUCTURAL_EXTENSIONS = new Set([".py", ".pyi"]);
 export const CODE_EXTENSIONS = new Set([
   ...JS_TS_EXTENSIONS,
   ...STRUCTURAL_EXTENSIONS,
-  ".go",
-  ".rs",
   ".java",
   ".cs",
   ".rb",
@@ -119,11 +151,21 @@ export const SUPPORTING_EXTENSIONS = new Set([
   ".sh",
   ".graphql",
   ".gql",
+  // Key material. Read so a committed private key can be found — without these
+  // the file is never indexed and the secret scanner cannot see what it exists
+  // to look for.
+  ".pem",
+  ".key",
 ]);
 
 /** Exact filenames worth reading regardless of extension. */
 export const SUPPORTING_FILENAMES = new Set([
   "dockerfile",
+  // SSH private keys carry no extension at all.
+  "id_rsa",
+  "id_dsa",
+  "id_ecdsa",
+  "id_ed25519",
   "docker-compose.yml",
   "docker-compose.yaml",
   "compose.yml",
@@ -147,7 +189,26 @@ export const LOCKFILES = new Set([
   "yarn.lock",
   "bun.lockb",
   "bun.lock",
+  // Non-npm ecosystems, added so the dependency-vulnerability check can read
+  // them. Listed here rather than as source because none of them is authored
+  // code, which is exactly what `isLockfile` is asked elsewhere.
+  "poetry.lock",
+  "cargo.lock",
+  "go.mod",
+  "go.sum",
+  "gemfile.lock",
+  "composer.lock",
 ]);
+
+/**
+ * Python's pinned-dependency convention, which has no single filename.
+ * `requirements.txt`, `requirements-dev.txt`, `requirements/base.txt`.
+ */
+const REQUIREMENTS_RE = /(^|[/\\])requirements[^/\\]*\.txt$/i;
+
+export function isRequirementsFile(relPath: string): boolean {
+  return REQUIREMENTS_RE.test(relPath);
+}
 
 const GENERATED_PATH_PATTERNS = [
   /\.min\.(js|css)$/i,
@@ -179,6 +240,12 @@ const TEST_PATH_PATTERNS = [
   // Python conventions: pytest collects test_*.py and *_test.py.
   /(^|[/\\])test_[^/\\]*\.pyi?$/i,
   /_test\.pyi?$/i,
+  // Go: `*_test.go` is enforced by the toolchain itself, so it is about as
+  // canonical as a test convention gets. Seen on `spf13/cobra`, where every
+  // single clone family was in a `_test.go` file and `duplicate-logic` read
+  // 0.80 on a well-regarded hand-written library. Fifth instance of the same
+  // mistake as the bare `test.js`, top-level `test/` and `tsd` cases.
+  /_test\.go$/i,
   /(^|[/\\])conftest\.pyi?$/i,
   /(^|[/\\])__tests__[/\\]/i,
   /(^|[/\\])__mocks__[/\\]/i,
@@ -218,6 +285,33 @@ export function isLockfile(relPath: string): boolean {
   return LOCKFILES.has(basenameOf(relPath));
 }
 
+/** Names a licence file carries. `LICENSE-MIT` and `LICENCE` both count. */
+const LICENSE_NAME = /^(?:un)?licen[cs]e(?:[-._].*)?$|^copying(?:[-._].*)?$|^notice(?:[-._].*)?$/;
+
+/**
+ * Extensions a licence is written with. The empty string is the common case.
+ *
+ * Constrained deliberately: without it a source file called `license.ts` — a
+ * licence *checker*, say — would be picked up as the project's licence.
+ */
+const LICENSE_EXTENSIONS = new Set(["", ".md", ".txt", ".rst"]);
+
+/**
+ * A licence file, which until now was never indexed at all.
+ *
+ * `LICENSE` has no extension and was in no filename list, so `isRelevantFile`
+ * rejected it and the file never reached `FileIndex`. **Exactly the shape of the
+ * `deploy/id_rsa` bug**: the one file a check most exists to read was invisible
+ * to it, and nothing failed — the check simply found nothing, which is
+ * indistinguishable from a repository with nothing to find.
+ */
+export function isLicenseFile(relPath: string): boolean {
+  const base = basenameOf(relPath);
+  const ext = extensionOf(relPath);
+  const stem = ext === "" ? base : base.slice(0, -ext.length);
+  return LICENSE_EXTENSIONS.has(ext) && LICENSE_NAME.test(stem);
+}
+
 export function isTestFile(relPath: string): boolean {
   return TEST_PATH_PATTERNS.some((p) => p.test(relPath));
 }
@@ -231,6 +325,8 @@ export function isRelevantFile(relPath: string): boolean {
   if (isIgnoredPath(relPath)) return false;
   if (isCodeFile(relPath)) return true;
   if (isLockfile(relPath)) return true;
+  if (isRequirementsFile(relPath)) return true;
+  if (isLicenseFile(relPath)) return true;
   const base = basenameOf(relPath);
   if (SUPPORTING_FILENAMES.has(base)) return true;
   if (base.startsWith(".env")) return true;

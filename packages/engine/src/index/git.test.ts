@@ -25,6 +25,7 @@ function commit(overrides: Partial<Commit> = {}): Commit {
     body: "feat: add a thing",
     files: [],
     churn: 40,
+    linesAdded: 40,
     ...overrides,
   };
 }
@@ -37,6 +38,8 @@ function manyCommits(count: number, churn = 40): Commit[] {
       body: `feat: change ${i}`,
       timestamp: Date.UTC(2025, 0, 1 + i),
       churn,
+      // Models the GraphQL path, which reports counts but no filenames.
+      linesAdded: churn,
     }),
   );
 }
@@ -123,11 +126,37 @@ describe("signals degrade honestly on API-sourced history", () => {
     expect(signal.evidence.join(" ")).toMatch(/Median commit changes 900 lines/);
   });
 
-  it("still computes velocity, which never needed per-file data", async () => {
+  it("still computes velocity, which needs line counts but not filenames", async () => {
+    /*
+     * This test used to say velocity "never needed per-file data", and it was
+     * right about the old implementation — which divided the repository's
+     * current size by active days and so needed nothing from the commits at
+     * all. It now measures lines actually added, which the API path does
+     * supply: GraphQL returns per-commit `additions` without filenames.
+     *
+     * The distinction is the point. Gating velocity on `statsComplete` — the
+     * flag meaning "we have every commit's file list" — silenced it on every
+     * GitHub-sourced scan, which is every scan the deployed product performs.
+     */
     const ctx = await contextWith(GitIndex.fromCommits(manyCommits(30)));
     const signal = buildVelocitySignal(ctx);
 
     expect(signal.available).toBe(true);
-    expect(signal.evidence.join(" ")).toMatch(/day\(s\) of commits/);
+    expect(signal.evidence.join(" ")).toMatch(/lines added across/);
+  });
+
+  it("reports velocity unavailable when the source carries no line counts", async () => {
+    // The REST list endpoint (used when no token is configured) returns no
+    // counts at all. Zero added lines is missing evidence, not a slow project.
+    const ctx = await contextWith(
+      GitIndex.fromCommits(
+        manyCommits(30).map((c) => ({ ...c, churn: 0, linesAdded: 0 })),
+      ),
+    );
+    const signal = buildVelocitySignal(ctx);
+
+    expect(signal.available).toBe(false);
+    expect(signal.unavailableReason).toMatch(/line counts are unavailable/);
+    expect(signal.value).toBe(0);
   });
 });

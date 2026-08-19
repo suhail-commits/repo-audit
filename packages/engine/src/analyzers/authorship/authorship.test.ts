@@ -426,3 +426,93 @@ describe("individual signals", () => {
     );
   });
 });
+
+/**
+ * `build-velocity` is a rate, and a rate needs both a real numerator and a real
+ * denominator. It had neither: it divided the repository's size *today* by the
+ * number of days that happened to carry a commit, and `Math.max(1, activeDays)`
+ * turned a single day into a divisor.
+ *
+ * Seen on `suhail-commits/repo-audit` — this repository, hand-written across one
+ * dense day, read 1.00 and carried the score to 26.
+ */
+describe("build-velocity", () => {
+  function velocityOf(commits: FixtureCommit[]) {
+    return authorshipOf({ commits }).then(({ result }) =>
+      result.score.signals.find((s) => s.id === "build-velocity")!,
+    );
+  }
+
+  /** A module of a chosen size, so a fixture can hit a target lines-per-day. */
+  function bulkModule(i: number, lines = 40): string {
+    return [
+      `export function unit${i}(input: number): number {`,
+      ...Array.from({ length: lines }, (_, k) => `  const step${k} = input + ${k};`),
+      `  return ${Array.from({ length: lines }, (_, k) => `step${k}`).join(" + ")};`,
+      `}`,
+    ].join("\n");
+  }
+
+  it("reports unavailable when every commit lands on one day", async () => {
+    const signal = await velocityOf(
+      Array.from({ length: 6 }, (_, i) => ({
+        message: `feat: add unit ${i}`,
+        files: { [`src/unit${i}.ts`]: bulkModule(i) },
+        date: `2025-04-01T${String(9 + i).padStart(2, "0")}:00:00Z`,
+      })),
+    );
+
+    expect(signal.available).toBe(false);
+    expect(signal.unavailableReason).toContain("active day");
+    // The invariant this protects: an unmeasurable signal must not be a zero.
+    expect(signal.value).toBe(0);
+  });
+
+  it("still fires when a real span carries a superhuman rate", async () => {
+    const signal = await velocityOf(
+      Array.from({ length: 6 }, (_, i) => ({
+        message: `feat: add feature set ${i}`,
+        // ~2,000 added lines per day across six separate days, one author —
+        // comfortably past the 400-to-3,000 ramp's midpoint.
+        files: Object.fromEntries(
+          Array.from({ length: 20 }, (_, k) => [
+            `src/day${i}/unit${k}.ts`,
+            bulkModule(i * 20 + k, 100),
+          ]),
+        ),
+        date: `2025-04-0${i + 1}T09:00:00Z`,
+      })),
+    );
+
+    expect(signal.available).toBe(true);
+    expect(signal.value).toBeGreaterThan(0.5);
+  });
+
+  it("does not fire on a large repo merely because it is large", async () => {
+    /*
+     * The defect this replaces: the old implementation read `files.totalSloc`,
+     * so a repository that already existed before the observed history counted
+     * every one of those lines as written during it. Here almost all the code
+     * arrives in a single early commit and the rest of the span adds little,
+     * which is what steady maintenance of a big codebase looks like.
+     */
+    const signal = await velocityOf([
+      {
+        message: "chore: import existing codebase",
+        files: Object.fromEntries(
+          Array.from({ length: 30 }, (_, k) => [`src/legacy/unit${k}.ts`, bulkModule(k)]),
+        ),
+        date: "2025-01-02T09:00:00Z",
+      },
+      ...Array.from({ length: 10 }, (_, i) => ({
+        message: `fix: tighten legacy unit ${i}`,
+        files: { [`src/legacy/unit${i}.ts`]: `${bulkModule(i)}\n// revisited\n` },
+        date: `2025-0${2 + Math.floor(i / 5)}-1${i % 5}T11:00:00Z`,
+      })),
+    ]);
+
+    expect(signal.available).toBe(true);
+    // 2,000-odd lines spread over eleven active days is an ordinary pace.
+    expect(signal.value).toBeLessThan(0.5);
+  });
+});

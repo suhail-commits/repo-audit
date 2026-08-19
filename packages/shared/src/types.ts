@@ -127,6 +127,44 @@ export interface Signal {
   evidence: string[];
   /** Set when available is false, explaining what was missing. */
   unavailableReason?: string;
+  /**
+   * Which files this signal implicates, keyed by repo-relative path, 0..1.
+   *
+   * **Sparse — only files with a non-zero value appear.** Most files are not
+   * implicated by most signals, so recording every file would multiply the
+   * stored result by the file count for no information.
+   *
+   * **A plain object, not a `Map`.** `ScanResult` is `JSON.stringify`d into
+   * Postgres, and a `Map` serialises to `{}` — which would work in development,
+   * where the fallback store keeps the live object, and silently lose every
+   * per-file value in production.
+   *
+   * Absent on signals that are repo-wide by nature: a commit trailer or a
+   * committed `CLAUDE.md` says something about the repository, not about any
+   * particular file, and inventing a per-file value for them would be a
+   * fabricated measurement.
+   */
+  perFile?: Readonly<Record<string, number>>;
+}
+
+/**
+ * A directory the file-attributable signals point at, for the report's
+ * "where the signs are strongest" ranking.
+ *
+ * **Deliberately carries no 0-100 score.** Only some signals can attribute to a
+ * file, so a directory number could never reconcile with the dimension score
+ * above it — two numbers on one page that cannot be compared is worse than one
+ * number and an ordering. `intensity` is relative within this list only.
+ */
+export interface DirectoryRank {
+  /** Repo-relative directory path, POSIX separators, no trailing slash. */
+  path: string;
+  /** Source files counted under it. */
+  files: number;
+  /** 0..1, normalised against the strongest directory in the same list. */
+  intensity: number;
+  /** Signal ids that implicated this directory, strongest first. */
+  signals: string[];
 }
 
 export interface DimensionScore {
@@ -137,6 +175,18 @@ export interface DimensionScore {
   signals: Signal[];
   /** Human-readable list of what could not be measured. */
   unavailable: string[];
+  /**
+   * Where the file-attributable signals concentrate, strongest first.
+   *
+   * Empty when no available signal carries per-file data — the honest answer
+   * for a repository whose evidence is all history-shaped — and must render as
+   * "no ranking" rather than as an empty chart.
+   *
+   * **Optional because scans stored before this existed do not have it.**
+   * `ScanResult` is persisted as jsonb and read back by the report, so a
+   * required field here would be a claim about rows that predate it.
+   */
+  hotspots?: DirectoryRank[];
 }
 
 /**
@@ -190,7 +240,51 @@ export interface RepoInfo {
   languages: LanguageShare[];
   /** The tier the bulk of this repository could be analyzed at. */
   analysisTier: AnalysisTier;
+
+  /**
+   * The exact revision analysed, when the history source names one.
+   *
+   * A report with no revision on it is a claim about "the repository", which is
+   * a moving target. The same repo scanned from a local checkout and through
+   * the GitHub API legitimately produced 11,436 and 7,519 lines on the same
+   * afternoon — one had unpushed work — and nothing on the page explained why.
+   *
+   * Optional because a zip upload has no commits to take it from, and because
+   * scans stored before this existed do not carry it.
+   */
+  headSha?: string;
+
+  /**
+   * When the source last moved, as the host reports it.
+   *
+   * Exists so a repeat scan can ask "has anything changed?" without paying for
+   * a whole analysis. It is deliberately *not* the head SHA: `pushed_at` comes
+   * back on the repository metadata call the scan already makes for the privacy
+   * and size gates, so comparing it costs nothing, while fetching a SHA costs
+   * its own request on every scan.
+   *
+   * It also fails in the safe direction. `pushed_at` moves on a push to any
+   * branch, not only the one analysed, so it can cause an unnecessary re-scan
+   * but can never serve a report for a revision that has been superseded.
+   *
+   * Optional: a zip upload has no host to ask, and rows predate it.
+   */
+  pushedAt?: string;
 }
+
+/**
+ * The shape `ScanResult` is written in today.
+ *
+ * **Written *and* read.** For a long time `schemaVersion` was stamped onto every
+ * result and never consulted anywhere, which made it decoration rather than a
+ * version: results are persisted as jsonb and read back by whatever code is
+ * deployed later, so the only thing standing between an old row and a crash was
+ * remembering to declare each new field optional by hand. That was not enough
+ * once — a row written before `focus` existed reached `dimensionLabel(undefined)`
+ * and took the page down. `readScanResult` in the web app is the one place that
+ * knows how to bring an older row up to this shape.
+ */
+export const CURRENT_SCHEMA_VERSION = 1;
 
 export interface ScanResult {
   schemaVersion: 1;
@@ -207,8 +301,43 @@ export interface ScanResult {
    * the engine so it cannot drift out of sync with what is registered.
    */
   analysedDimensions: Dimension[];
+
+  /**
+   * How the codebase is put together, aggregated to directories.
+   *
+   * Absent — never an empty graph — when there is nothing honest to draw:
+   * `ImportGraph` resolves JS/TS only, so a Python repository has no edges at
+   * all and would render as boxes with no lines between them, a confident
+   * picture of a codebase where nothing imports anything.
+   *
+   * Optional for the same reason `DimensionScore.hotspots` is: `ScanResult` is
+   * persisted as jsonb and read back, so a required field would be a claim
+   * about rows that predate it.
+   */
+  moduleGraph?: ModuleGraph;
+
   /** Wall-clock analysis time, for the ops view. */
   durationMs: number;
   /** Non-fatal problems during analysis — unparseable files, tool crashes. */
   warnings: string[];
+}
+
+/** One directory in the module map, and how much code it holds. */
+export interface ModuleGraphNode {
+  path: string;
+  files: number;
+}
+
+/** `count` is how many individual imports the directory-level edge stands for. */
+export interface ModuleGraphEdge {
+  from: string;
+  to: string;
+  count: number;
+}
+
+export interface ModuleGraph {
+  nodes: ModuleGraphNode[];
+  edges: ModuleGraphEdge[];
+  /** Directories left off the diagram by the node cap. Stated, never silent. */
+  omitted: number;
 }

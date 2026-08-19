@@ -1,10 +1,14 @@
 export {
+  assertScannable,
   buildContext,
   scanRepository,
   scanGitHubRepository,
   type ScanOptions,
   type GitHubScanOptions,
+  type ProgressOptions,
+  type ScanStage,
 } from "./scan";
+export { probeStructuralParsers, type ParserProbe } from "./index/structural";
 export type { AnalysisContext } from "./analyzers/context";
 
 export {
@@ -15,6 +19,12 @@ export {
 } from "./analyzers/authorship/index";
 
 export { analyzeHealth, type HealthResult } from "./analyzers/health/index";
+
+export {
+  analyzeSecurity,
+  type SecurityOptions,
+  type SecurityResult,
+} from "./analyzers/security/index";
 
 export { scoreDimension, authorshipBand } from "./score/index";
 

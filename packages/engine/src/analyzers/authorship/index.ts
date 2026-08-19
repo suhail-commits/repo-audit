@@ -8,6 +8,7 @@ import {
   commitSizeSignal,
   writeOnceFilesSignal,
 } from "./commit-shape";
+import { refactorRatioSignal } from "./rework";
 import {
   analyzeClones,
   cloneFindings,
@@ -22,6 +23,7 @@ import {
   unusedDependencySignal,
 } from "./dead";
 import { conventionDriftSignal } from "./drift";
+import { swallowedErrorFindings, swallowedErrorSignal } from "./errors";
 import {
   agentToolingSignal,
   platformFindings,
@@ -73,6 +75,7 @@ export function analyzeAuthorship(
     commitMessageSignal(ctx),
     buildVelocitySignal(ctx),
     writeOnceFilesSignal(ctx),
+    refactorRatioSignal(ctx),
     // Structure — these are the signals that survive a zip with no git history.
     cloneSignal(ctx, clones),
     conventionDriftSignal(ctx),
@@ -81,6 +84,7 @@ export function analyzeAuthorship(
     overlappingUtilsSignal(ctx),
     obviousCommentSignal(ctx),
     tautologicalTestSignal(ctx),
+    swallowedErrorSignal(ctx),
   ];
 
   const used = options.structuralOnly
@@ -89,12 +93,18 @@ export function analyzeAuthorship(
 
   const score = scoreDimension("authorship", used, {
     groundTruthSignals: options.structuralOnly ? [] : GROUND_TRUTH,
+    // Source files only: the denominators for the directory ranking have to
+    // match the set the signals judge, or a directory full of tests reads as
+    // clean simply because nothing looked at it.
+    sourceFiles: ctx.files.sourceFiles().map((f) => f.relPath),
+    truncated: ctx.files.truncated,
   });
 
   const findings: Finding[] = [
     ...(options.structuralOnly ? [] : platformFindings(ctx)),
     ...cloneFindings(clones),
     ...deadCodeFindings(ctx),
+    ...swallowedErrorFindings(ctx),
   ];
 
   const agents = options.structuralOnly ? [] : attributedAgents(ctx);

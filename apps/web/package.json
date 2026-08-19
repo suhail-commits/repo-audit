@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev -p 4000",
     "build": "next build",
     "start": "next start",
     "seed": "tsx scripts/seed-examples.ts",
@@ -15,9 +15,12 @@
     "@vibe/engine": "workspace:*",
     "@vibe/rules": "workspace:*",
     "@vibe/shared": "workspace:*",
+    "motion": "^13.1.0",
     "next": "^16.3.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "tree-sitter-wasms": "^0.1.13",
+    "web-tree-sitter": "0.24.7"
   },
   "devDependencies": {
     "@types/react": "^19.2.0",

@@ -3,11 +3,13 @@ import { createHash } from "node:crypto";
 import type { Finding, Signal } from "@vibe/shared";
 
 import { isFunctionNode, walk, type AstNode, type ParsedFile } from "../../index/ast";
+import type { Language } from "../../index/language";
 import {
   collectNamed,
   walkNamed,
-  type PythonFile,
-} from "../../index/python";
+  type StructuralFile,
+  type TsNode,
+} from "../../index/structural";
 import { ramp, type AnalysisContext } from "../context";
 
 /**
@@ -22,19 +24,114 @@ import { ramp, type AnalysisContext } from "../context";
 
 export const WEIGHT = 2.5;
 
-/** Functions smaller than this match by coincidence and are ignored. */
-const MIN_NODES = 18;
+/**
+ * Functions smaller than this match by coincidence and are ignored.
+ *
+ * **Raised from 18 after reading the report this tool produces about itself.**
+ * At 18, every one of the eight Code health findings on this repository was a
+ * pair of one-line helpers: `isTestFile` and `isGeneratedPath`
+ * (`return PATTERNS.some((p) => p.test(relPath))`), `importsOf` and
+ * `importersOf`, `authorshipBand` and `healthBand`. Each really is the same
+ * shape, and saying so is useless — two guard clauses that both delegate to
+ * `.some()` are not a duplication problem, they are what a small function looks
+ * like.
+ *
+ * A TypeScript one-liner reaches about 19 named nodes once its parameter types,
+ * return type and the arrow inside it are counted, which is why 18 caught them
+ * and why the figure has to clear that band rather than sit against it. 30 also
+ * matches what Go and Rust already use for the same reason — the threshold is
+ * about how many nodes a language spends before saying anything, and annotated
+ * TypeScript spends about as many as Go does.
+ *
+ * The cost is real and accepted: a genuinely duplicated short helper is now
+ * missed. **A false positive costs more than a missed finding**, and eight
+ * trivial ones at the top of a section is how a reader decides the tool is
+ * naive.
+ */
+const MIN_NODES = 30;
 
 /**
- * Python threshold, counted over *named* CST nodes only.
+ * Per-language node names, because "identifier" and "a function" are spelled
+ * differently in every grammar.
  *
- * Measured against real functions: a two-line `def add(a, b)` is 10 nodes, a
- * five-line loop is 19, a six-line date helper is 45. Eighteen therefore keeps
- * anything with real logic and drops trivial accessors — landing in the same
- * place as the JS/TS figure rather than above it, because filtering out
- * anonymous nodes already removes the CST's extra punctuation.
+ * `functions` are the nodes worth hashing. `identifiers` and `literals` are
+ * erased to `$` and `#`, which is what makes this type-2 detection: two
+ * functions with the same shape and different names collide.
+ *
+ * `minNodes` is a *per-language* threshold counted over named nodes only, and
+ * it is not transferable. Python is terse, so 18 nodes is already real logic.
+ * Go and Rust spell out types as nodes — a one-line Go function that does
+ * nothing interesting already measures around 18 — so the same figure there
+ * would match trivial accessors by coincidence.
  */
-const MIN_PYTHON_NODES = 18;
+interface GrammarShape {
+  functions: string[];
+  identifiers: Set<string>;
+  literals: Set<string>;
+  minNodes: number;
+  /** Field holding the function's name, for the report. */
+  nameField: string;
+}
+
+const GRAMMAR_SHAPES: Partial<Record<Language, GrammarShape>> = {
+  python: {
+    functions: ["function_definition"],
+    identifiers: new Set(["identifier", "dotted_name"]),
+    literals: new Set([
+      "string",
+      "string_content",
+      "integer",
+      "float",
+      "true",
+      "false",
+      "none",
+    ]),
+    minNodes: 18,
+    nameField: "name",
+  },
+  go: {
+    functions: ["function_declaration", "method_declaration", "func_literal"],
+    identifiers: new Set([
+      "identifier",
+      "type_identifier",
+      "field_identifier",
+      "package_identifier",
+    ]),
+    literals: new Set([
+      "int_literal",
+      "float_literal",
+      "imaginary_literal",
+      "rune_literal",
+      "interpreted_string_literal",
+      "raw_string_literal",
+      "true",
+      "false",
+      "nil",
+    ]),
+    minNodes: 30,
+    nameField: "name",
+  },
+  rust: {
+    functions: ["function_item", "closure_expression"],
+    identifiers: new Set([
+      "identifier",
+      "type_identifier",
+      "field_identifier",
+      "scoped_identifier",
+      "primitive_type",
+    ]),
+    literals: new Set([
+      "integer_literal",
+      "float_literal",
+      "string_literal",
+      "raw_string_literal",
+      "char_literal",
+      "boolean_literal",
+    ]),
+    minNodes: 30,
+    nameField: "name",
+  },
+};
 
 export interface FunctionShape {
   file: string;
@@ -131,54 +228,101 @@ export function collectFunctionShapes(parsed: ParsedFile): FunctionShape[] {
 }
 
 /**
- * Python equivalent, over tree-sitter's concrete tree.
+ * The tree-sitter equivalent, over any grammar with a shape table.
  *
- * Same idea as the JS/TS version — hash the shape with names and literals erased
- * — with two adjustments for the different tree. Only *named* nodes are counted,
- * since the CST includes every colon and keyword; and the node threshold is
- * higher because Python bodies are terser, so a low threshold matches trivial
- * functions by coincidence.
+ * Same idea as the JS/TS version — hash the structure with names and literals
+ * erased — with two adjustments for a concrete tree. Only *named* nodes are
+ * counted, since the CST includes every colon and keyword; and the node
+ * threshold comes from the language, because verbosity per unit of logic is
+ * not the same in Python and Go.
+ *
+ * Returns nothing for a language with no table. That is the honest answer: a
+ * grammar we can load but whose node names we have not wired up would produce
+ * shapes made entirely of unrecognised types, which hash consistently and would
+ * therefore report confident, meaningless duplication.
  */
-export function collectPythonFunctionShapes(parsed: PythonFile): FunctionShape[] {
-  const shapes: FunctionShape[] = [];
+export function collectStructuralFunctionShapes(
+  parsed: StructuralFile,
+): FunctionShape[] {
+  const grammar = GRAMMAR_SHAPES[parsed.language];
+  if (!grammar) return [];
 
-  for (const fn of collectNamed(parsed.tree.rootNode, "function_definition")) {
+  const shapes: FunctionShape[] = [];
+  const excluded = inlineTestRanges(parsed);
+
+  for (const fn of collectNamed(parsed.tree.rootNode, grammar.functions)) {
+    if (excluded.some(([from, to]) => fn.startIndex >= from && fn.endIndex <= to)) {
+      continue;
+    }
+
     const tokens: string[] = [];
     let nodeCount = 0;
 
     walkNamed(fn, (node) => {
       nodeCount++;
-      switch (node.type) {
-        case "identifier":
-        case "dotted_name":
-          tokens.push("$");
-          break;
-        case "string":
-        case "string_content":
-        case "integer":
-        case "float":
-        case "true":
-        case "false":
-        case "none":
-          tokens.push("#");
-          break;
-        default:
-          tokens.push(node.type);
-      }
+      if (grammar.identifiers.has(node.type)) tokens.push("$");
+      else if (grammar.literals.has(node.type)) tokens.push("#");
+      else tokens.push(node.type);
     });
 
-    if (nodeCount < MIN_PYTHON_NODES) continue;
+    if (nodeCount < grammar.minNodes) continue;
 
     shapes.push({
       file: parsed.relPath,
       line: fn.startPosition.row + 1,
-      name: fn.childForFieldName("name")?.text ?? "<anonymous>",
+      name: fn.childForFieldName(grammar.nameField)?.text ?? "<anonymous>",
       nodeCount,
       shapeHash: createHash("sha1").update(tokens.join(",")).digest("hex"),
     });
   }
 
   return shapes;
+}
+
+/** Rust attributes that mark the item after them as test-only. */
+const RUST_TEST_ATTRIBUTE = /^#\s*\[\s*(cfg\s*\(\s*test\s*\)|test\b|bench\b|\w+::test\b)/;
+
+/**
+ * Source ranges holding tests that live *inside* a source file.
+ *
+ * Path-based test detection cannot see these. Rust's dominant convention is a
+ * `#[cfg(test)] mod tests` block at the bottom of the module it tests, so on
+ * `BurntSushi/ripgrep` every clone family was inline test code in genuine
+ * source files — `crates/core/flags/defs.rs` and `crates/printer/src/standard.rs`
+ * — and `duplicate-logic` read 0.57 on a repository whose tests are simply
+ * table-shaped, as test tables are.
+ *
+ * Attributes are siblings of the item they annotate rather than children, which
+ * is why this walks ordered children instead of using `collectNamed`.
+ */
+function inlineTestRanges(parsed: StructuralFile): Array<[number, number]> {
+  if (parsed.language !== "rust") return [];
+
+  const ranges: Array<[number, number]> = [];
+
+  const visit = (node: TsNode): void => {
+    let previous: TsNode | null = null;
+    for (let i = 0; i < node.namedChildCount; i++) {
+      const child = node.namedChild(i);
+      if (!child) continue;
+
+      if (
+        previous?.type === "attribute_item" &&
+        RUST_TEST_ATTRIBUTE.test(previous.text)
+      ) {
+        // The whole annotated item goes, so a `#[cfg(test)] mod` takes every
+        // function inside it without needing to recurse.
+        ranges.push([child.startIndex, child.endIndex]);
+      } else {
+        visit(child);
+      }
+
+      previous = child;
+    }
+  };
+
+  visit(parsed.tree.rootNode);
+  return ranges;
 }
 
 export function analyzeClones(ctx: AnalysisContext): CloneReport {
@@ -204,10 +348,13 @@ export function analyzeClones(ctx: AnalysisContext): CloneReport {
     if (isAuthored(parsed.relPath)) add(collectFunctionShapes(parsed));
   }
 
-  // Hashes are of node-type token sequences, and the two parsers use disjoint
-  // type names, so a Python function can never collide with a JS one.
-  for (const parsed of ctx.python.all()) {
-    if (isAuthored(parsed.relPath)) add(collectPythonFunctionShapes(parsed));
+  /*
+   * Hashes are over node-type token sequences and the grammars use disjoint
+   * type names, so a Python function cannot collide with a Go or a JS one.
+   * That matters: a cross-language "duplicate" would be nonsense.
+   */
+  for (const parsed of ctx.structural.all()) {
+    if (isAuthored(parsed.relPath)) add(collectStructuralFunctionShapes(parsed));
   }
 
   const families: CloneFamily[] = [];
@@ -257,12 +404,33 @@ export function cloneSignal(ctx: AnalysisContext, report: CloneReport): Signal {
     );
   }
 
+  /*
+   * Per file: how much of that file's duplicated weight sits here. A file with
+   * three cloned functions is more implicated than one with a single copy, so
+   * this counts members rather than marking files present-or-absent.
+   */
+  const clonedPerFile = new Map<string, number>();
+  for (const family of report.families) {
+    if (family.members.length < 2) continue;
+    for (const member of family.members) {
+      clonedPerFile.set(member.file, (clonedPerFile.get(member.file) ?? 0) + 1);
+    }
+  }
+
+  const perFile: Record<string, number> = {};
+  for (const [file, count] of clonedPerFile) {
+    // Three or more clones in one file is as strong as this gets; past that the
+    // value would keep climbing on a distinction nobody acts on differently.
+    perFile[file] = Math.min(1, count / 3);
+  }
+
   return {
     id: "duplicate-logic",
     value: ramp(ratio, 0.05, 0.35),
     weight: WEIGHT,
     available: true,
     evidence,
+    perFile,
   };
 }
 

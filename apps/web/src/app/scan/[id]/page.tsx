@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 
-import { DIMENSIONS, PERSONAS } from "@vibe/shared";
+import { PERSONAS } from "@vibe/shared";
 
 import { Report } from "@/components/Report";
 import { getScan } from "@/db";
@@ -22,16 +22,17 @@ export default async function ScanPage({
   if (!scan) notFound();
 
   /*
-   * The stored value is a default, not a guarantee.
+   * The stored value is a default, not a guarantee. Read from a query string
+   * *and* from a row that may predate the column, so it is validated on both
+   * sides — an earlier version checked only the query string and a row stored
+   * before its column existed reached `dimensionLabel(undefined)` and crashed
+   * the page.
    *
-   * Both of these are read from a query string *and* from a row that may
-   * predate the column — the earlier version of this validated only the query
-   * string and fell back to `scan.focus` unchecked, so a scan stored before
-   * `focus` existed reached `dimensionLabel(undefined)` and crashed the page.
-   * Validate at the boundary, both sides.
+   * `scan.focus` is no longer read at all: the report renders every dimension,
+   * so there is nothing left for it to select. The column stays because rows
+   * already carry it and dropping it would be a migration for no gain.
    */
   const persona = pick(query["persona"], scan.persona, PERSONAS, "founder");
-  const focus = pick(query["focus"], scan.focus, DIMENSIONS, "authorship");
 
   if (!scan.result) {
     return (
@@ -50,14 +51,7 @@ export default async function ScanPage({
     );
   }
 
-  return (
-    <Report
-      scanId={scan.id}
-      result={scan.result}
-      persona={persona}
-      focus={focus}
-    />
-  );
+  return <Report scanId={scan.id} result={scan.result} persona={persona} />;
 }
 
 /**

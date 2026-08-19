@@ -7,6 +7,7 @@ import {
   type ParsedFile,
 } from "./ast";
 import type { FileIndex } from "./files";
+import { countOf } from "../format";
 
 export type RouteFramework =
   | "next-app"
@@ -80,7 +81,7 @@ export class RouteTable {
     const unresolved = table.routes.filter((r) => !r.resolved).length;
     if (unresolved > 0) {
       table.warnings.push(
-        `${unresolved} route(s) detected but their handlers could not be resolved`,
+        `${countOf(unresolved, "route")} detected but their handlers could not be resolved`,
       );
     }
     return table;

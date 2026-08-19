@@ -68,3 +68,151 @@ export function dimensionLabel(
 ): DimensionLabel {
   return LABELS[dimension][persona];
 }
+
+/**
+ * Heading for the directory ranking, per dimension and persona.
+ *
+ * Phrased as *where the signs are*, never as a verdict about the folder. The
+ * ranking is relative and built from a subset of the checks, so wording that
+ * implied a folder had been scored would be claiming more than was measured.
+ */
+const HOTSPOT_TITLES: Record<Dimension, Record<Persona, string>> = {
+  authorship: {
+    founder: "Where the signs are strongest",
+    engineer: "Signal concentration by directory",
+    acquirer: "Where generated code concentrates",
+  },
+  health: {
+    founder: "Where the problems concentrate",
+    engineer: "Defect concentration by directory",
+    acquirer: "Where remediation would focus",
+  },
+  security: {
+    founder: "Where the risk concentrates",
+    engineer: "Exposure concentration by directory",
+    acquirer: "Where exposure concentrates",
+  },
+};
+
+export function hotspotTitle(dimension: Dimension, persona: Persona): string {
+  return HOTSPOT_TITLES[dimension][persona];
+}
+
+/**
+ * The opening line for a dimension that has no analyzer.
+ *
+ * The report shows one dimension at a time, so the page headline has to come
+ * from *that* dimension. Falling back to the authorship headline printed
+ * "Authorship 14/100 — unlikely to be AI-generated" at the top of the Security
+ * page, which is a confident answer to a question nobody asked and no answer at
+ * all to the one they did.
+ */
+export function notAnalysedHeadline(
+  dimension: Dimension,
+  persona: Persona,
+): string {
+  const title = LABELS[dimension][persona].title;
+  if (persona === "engineer") return `${title}: no analyzer registered.`;
+  return `We haven't built the ${title.toLowerCase()} checks yet.`;
+}
+
+/**
+ * Heading for the cross-section shortlist.
+ *
+ * Phrased as an *ordering* of what was found, never as an instruction. "Fix
+ * these" would assert that each item is a defect worth a developer's afternoon,
+ * which is a judgement about someone else's priorities that nothing here
+ * measured. We ranked what we found; the reader decides what to do with it.
+ */
+export function prioritiesTitle(persona: Persona): string {
+  if (persona === "engineer") return "Ranked by severity";
+  if (persona === "acquirer") return "Most material findings";
+  return "Where we'd look first";
+}
+
+/**
+ * The line under that heading, naming the rule the ordering used.
+ *
+ * `total` is every actionable finding, `shown` the head of the list. Saying how
+ * many were left out matters: a shortlist that silently truncates reads as the
+ * complete set, which is the same mistake as a capped scan reporting "covered
+ * everything".
+ */
+export function prioritiesCaveat(
+  shown: number,
+  total: number,
+  persona: Persona,
+): string {
+  const rule =
+    persona === "engineer"
+      ? "Severity, then confidence."
+      : "Most serious first, and where we are surest.";
+  if (total <= shown) return rule;
+  return `${rule} ${total - shown} more below.`;
+}
+
+/**
+ * The caveat under the ranking.
+ *
+ * `count` is computed from the signals that actually contributed, not written
+ * as a constant: `write-once-files` is unavailable on any scan sourced from the
+ * GitHub API, so the same repository legitimately ranks on fewer checks there
+ * than it does from a local checkout.
+ */
+export function hotspotCaveat(count: number, persona: Persona): string {
+  const one = count === 1;
+  if (persona === "engineer") {
+    return (
+      `Ordering only, from the ${count} ${one ? "check" : "checks"} that ` +
+      `attribute per file. Not a per-directory score.`
+    );
+  }
+  return (
+    `Based on the ${count} ${one ? "check" : "checks"} that ${one ? "works" : "work"} ` +
+    `file by file. It shows the order, not a score for each folder.`
+  );
+}
+
+/**
+ * What the number under a heading is measuring, in the reader's register.
+ *
+ * All three dimensions run the same direction — higher means more of what was
+ * measured — so the health and security captions have to say "problems found"
+ * rather than name the section, or a reader supplies the opposite meaning from
+ * the word "health" and reads a good score as a bad one.
+ *
+ * Lives here rather than in the web report because the CLI prints the same
+ * number and needs the same disclaimer beside it. The direction of a scale is
+ * exactly the kind of thing two surfaces must not describe differently.
+ */
+export function scoreCaption(dimension: Dimension, persona: Persona): string {
+  if (dimension === "authorship") {
+    if (persona === "engineer") return "authorship";
+    if (persona === "acquirer") return "AI-generation likelihood";
+    return "how much looks AI-written";
+  }
+  if (dimension === "security") {
+    if (persona === "engineer") return "problems found — higher is worse";
+    if (persona === "acquirer") return "exposure";
+    return "problems found";
+  }
+  if (persona === "engineer") return "problems found — higher is worse";
+  if (persona === "acquirer") return "maintenance debt";
+  return "problems found";
+}
+
+/**
+ * How many of a dimension's checks produced a measurement.
+ *
+ * Phrased as evidence availability rather than as failure: "some checks could
+ * not run" reads like a malfunction, when the honest meaning is that this
+ * repository does not carry the evidence they need.
+ */
+export function coverageLine(measured: number, total: number): string {
+  const missing = total - measured;
+  if (missing <= 0) return `Based on all ${total} checks.`;
+  return (
+    `Based on ${measured} of ${total} checks — ${missing} needed evidence ` +
+    `this repository doesn't have.`
+  );
+}

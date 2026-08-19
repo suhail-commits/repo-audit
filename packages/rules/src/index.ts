@@ -17,4 +17,15 @@ export {
   labelledSignalIds,
   type SignalLabel,
 } from "./signal-labels";
-export { dimensionLabel, type DimensionLabel } from "./dimension-labels";
+export { corpusComparison } from "./corpus";
+export {
+  coverageLine,
+  scoreCaption,
+  dimensionLabel,
+  hotspotTitle,
+  hotspotCaveat,
+  notAnalysedHeadline,
+  prioritiesTitle,
+  prioritiesCaveat,
+  type DimensionLabel,
+} from "./dimension-labels";

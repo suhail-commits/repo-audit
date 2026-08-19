@@ -1,13 +1,19 @@
-import { GitHubError, scanGitHubRepository } from "@vibe/engine";
+import { GitHubError, fetchRepoMeta, scanGitHubRepository } from "@vibe/engine";
 import {
   DIMENSIONS,
   PERSONAS,
+  parseRepoSlug,
   type Dimension,
   type Persona,
 } from "@vibe/shared";
 
-import { createScan } from "@/db";
-import { parseRepoSlug } from "@/lib/slug";
+import {
+  checkRateLimit,
+  createScan,
+  latestScanFor,
+  recordRequest,
+} from "@/db";
+import { callerHash, estimateSpend } from "@/db/limits";
 
 export const runtime = "nodejs";
 /**
@@ -18,8 +24,29 @@ export const runtime = "nodejs";
  */
 export const maxDuration = 60;
 
-/** Repository size ceiling in KB, as GitHub reports it. */
+/**
+ * Cheap pre-filter, not the memory ceiling.
+ *
+ * GitHub's `size` is the packed git object store — history, every branch, every
+ * blob ever committed — which relates only loosely to how much source a scan
+ * reads. It is worth checking because it is free and it avoids downloading a
+ * tarball that could never be analysed, but treating it as *the* limit was a
+ * mistake: it let repositories through that then exhausted the function's
+ * memory, and refused ones with long histories and little code.
+ *
+ * The real bound is `LIMITS.maxTotalBytes` in the engine, enforced while
+ * walking, where exceeding it truncates deterministically and lowers the
+ * reported confidence instead of killing the process.
+ */
 const MAX_REPO_KB = 120_000;
+
+/**
+ * How long a stored scan is served without re-checking the repository.
+ *
+ * Inside this window a repeat request costs zero external calls; outside it,
+ * one metadata request decides whether the stored answer is still current.
+ */
+const RECHECK_AFTER_MS = 5 * 60_000;
 
 export async function POST(request: Request): Promise<Response> {
   let form: FormData;
@@ -40,15 +67,80 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
+  const caller = callerHash(request);
+  const auth = process.env["GITHUB_TOKEN"]
+    ? { token: process.env["GITHUB_TOKEN"] }
+    : {};
+
   try {
-    const result = await scanGitHubRepository(slug, {
-      maxSizeKb: MAX_REPO_KB,
-      ...(process.env["GITHUB_TOKEN"]
-        ? { token: process.env["GITHUB_TOKEN"] }
-        : {}),
+    /*
+     * Is there already an answer for this repository, and is it still true?
+     *
+     * Looked up before the rate-limit check, and the order is deliberate: what
+     * this request is about to cost depends on the answer, and the ceiling is
+     * expressed in GitHub requests. It is one indexed local query, so a request
+     * that ends up refused has still made no external call.
+     */
+    const previous = await latestScanFor(slug);
+    const knownPushedAt = previous?.result?.repo.pushedAt;
+    const withinRecheckWindow =
+      previous !== null && Date.now() - previous.createdAt < RECHECK_AFTER_MS;
+
+    /*
+     * Booked before the work, not after.
+     *
+     * The first version counted rows in `scans`, which meant it counted
+     * *results* — and both cached branches below return before a result exists.
+     * Measured: 12 consecutive cached hits against a ceiling of 5, every one
+     * allowed, each out-of-window hit spending a GitHub request charged to
+     * nobody. Counting attempts in `request_log` is what closes that.
+     */
+    const about = estimateSpend({
+      hasStoredScan: previous !== null,
+      withinRecheckWindow,
     });
 
-    const id = await createScan({ slug, persona, focus, result });
+    const verdict = await checkRateLimit(caller, about);
+    if (!verdict.allowed) {
+      return json({ error: verdict.message }, 429);
+    }
+    await recordRequest(caller, about);
+
+    /*
+     * A very recent scan is served without asking GitHub anything, which makes
+     * a repeatedly-requested repository free rather than merely cheap.
+     *
+     * Five minutes is chosen against what it risks: a repository that changed
+     * in the last five minutes reported at its previous revision, with the
+     * revision printed on the report either way.
+     */
+    if (previous && withinRecheckWindow) {
+      return json({ id: previous.id, cached: true }, 200);
+    }
+
+    /*
+     * Past the window, one metadata request decides it — and this is a request
+     * the scan makes anyway for the privacy and size gates, so handing `meta`
+     * to `scanGitHubRepository` below keeps a miss at three requests rather
+     * than four.
+     */
+    const meta = knownPushedAt
+      ? await fetchRepoMeta(slug, auth)
+      : undefined;
+
+    if (previous && meta && knownPushedAt === meta.pushedAt) {
+      return json({ id: previous.id, cached: true }, 200);
+    }
+
+    const result = await scanGitHubRepository(slug, {
+      // Public deployment: the dependency lookup is worth the extra requests.
+      checkVulnerabilities: true,
+      maxSizeKb: MAX_REPO_KB,
+      ...(meta ? { meta } : {}),
+      ...auth,
+    });
+
+    const id = await createScan({ slug, persona, focus, result, caller });
     return json({ id }, 201);
   } catch (err) {
     if (err instanceof GitHubError) {
@@ -70,11 +162,12 @@ function readPersona(value: FormDataEntryValue | null): Persona {
 }
 
 /**
- * Which question the visitor came to ask.
+ * Vestigial, and kept deliberately.
  *
- * Presentation only — one scan produces all three dimensions regardless, since
- * the indexes are shared and skipping an analyzer would save almost nothing.
- * This decides which section leads the report.
+ * The form no longer submits a focus — the report renders every dimension, so
+ * there is nothing left to select. The column is still written because rows
+ * already carry it and the read path still validates it; dropping it would be a
+ * migration in exchange for one unused string.
  */
 function readFocus(value: FormDataEntryValue | null): Dimension {
   return typeof value === "string" && DIMENSIONS.includes(value as Dimension)

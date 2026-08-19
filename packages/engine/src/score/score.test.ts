@@ -125,3 +125,40 @@ describe("ground-truth confidence", () => {
     expect(withoutSignal.unavailable).toEqual(["no git history"]);
   });
 });
+
+describe("a repository too large to read in full", () => {
+  const full = [
+    signal({ id: "a", value: 0.5, weight: 2 }),
+    signal({ id: "b", value: 0.5, weight: 2 }),
+  ];
+
+  it("lowers confidence without touching the score", () => {
+    const complete = scoreDimension("authorship", full);
+    const partial = scoreDimension("authorship", full, { truncated: true });
+
+    /*
+     * The same invariant that governs a missing signal, applied to the largest
+     * missing input there is. `FileIndex.truncated` used to produce a warning
+     * string and nothing else, so a repository where a fifth of the files were
+     * read reported `high` confidence exactly like one read completely — every
+     * signal "available", because each one did run, over a fraction of the
+     * code.
+     */
+    expect(partial.score).toBe(complete.score);
+    expect(complete.confidence).toBe("high");
+    expect(partial.confidence).toBe("low");
+  });
+
+  it("says so rather than only lowering a number", () => {
+    const partial = scoreDimension("authorship", full, { truncated: true });
+    expect(partial.unavailable.join(" ")).toMatch(/too large to read in full/);
+  });
+
+  it("caps confidence even when every signal ran", () => {
+    // Full signal coverage is what makes this case dangerous: nothing else in
+    // the result hints that the analysis was partial.
+    const partial = scoreDimension("authorship", full, { truncated: true });
+    expect(partial.signals.every((s) => s.available)).toBe(true);
+    expect(partial.confidence).toBe("low");
+  });
+});

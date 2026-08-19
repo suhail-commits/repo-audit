@@ -6,6 +6,14 @@ const SLUG_RE = /^[A-Za-z0-9][\w.-]*\/[\w.-]+$/;
  *
  * Rejecting here rather than at the API boundary means the user gets an
  * immediate, specific error instead of a failed scan.
+ *
+ * **Lives in shared because two entry points take repository input from a
+ * human**, and only one of them used to be forgiving. The web form has accepted
+ * a pasted GitHub URL since it was written; the CLI accepted only a bare
+ * `owner/repo`, so pasting the URL straight out of the address bar — the single
+ * most likely thing anyone does — was rejected as invalid. The engine's
+ * `isValidSlug` is a stricter *validator* over an already-normalized slug and
+ * stays where it is; this is the normalizer that runs first.
  */
 export function parseRepoSlug(input: string): string | null {
   let value = input.trim();
