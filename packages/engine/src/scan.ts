@@ -30,7 +30,10 @@ import { RouteTable } from "./index/routes";
 import { isJsTsFile } from "./ingest/guards";
 import { buildModuleGraph } from "./score/module-graph";
 
-export interface ScanOptions extends AuthorshipOptions, SecurityOptions {
+export interface ScanOptions
+  extends AuthorshipOptions,
+    SecurityOptions,
+    ProgressOptions {
   /** How the source arrived; determines which signals are possible. */
   kind: "github" | "zip";
   /** Display name — "owner/repo" or the uploaded filename. */
@@ -43,7 +46,59 @@ export interface ScanOptions extends AuthorshipOptions, SecurityOptions {
   git?: GitIndex;
 }
 
-export interface BuildContextOptions {
+/**
+ * A phase of the scan, announced as it begins.
+ *
+ * Carries its own label so every caller says the same thing. The web app
+ * advanced six invented stage strings on a 2.2-second timer regardless of what
+ * the scan was doing, which is a fiction a terminal audience notices
+ * immediately — and which reported "Weighing the evidence" while the tarball
+ * was still downloading.
+ */
+export interface ScanStage {
+  id:
+    | "fetching"
+    | "reading"
+    | "parsing"
+    | "history"
+    | "imports"
+    | "routes"
+    | "authorship"
+    | "health"
+    | "security";
+  label: string;
+}
+
+const STAGES: Record<ScanStage["id"], string> = {
+  fetching: "Fetching the repository",
+  reading: "Reading every file",
+  parsing: "Parsing JavaScript and TypeScript",
+  history: "Reading the commit history",
+  imports: "Resolving imports into a graph",
+  routes: "Finding HTTP routes",
+  authorship: "Weighing the authorship signals",
+  health: "Re-weighting them as code health",
+  security: "Checking for exposed keys, open routes and advisories",
+};
+
+/** Announce a phase, if anyone is listening. */
+export function stage(
+  onProgress: ((stage: ScanStage) => void) | undefined,
+  id: ScanStage["id"],
+): void {
+  onProgress?.({ id, label: STAGES[id] });
+}
+
+export interface ProgressOptions {
+  /**
+   * Called as each phase begins. Synchronous and best-effort: a caller that
+   * throws here would take down a scan that had otherwise succeeded, so the
+   * engine never awaits it and never retries.
+   */
+  onProgress?: (stage: ScanStage) => void;
+}
+
+export interface BuildContextOptions extends ProgressOptions {
   git?: GitIndex;
 }
 
@@ -57,13 +112,24 @@ export async function buildContext(
   rootPath: string,
   options: BuildContextOptions = {},
 ): Promise<AnalysisContext> {
+  const { onProgress } = options;
+
+  stage(onProgress, "reading");
   const files = await FileIndex.build(rootPath);
+
+  stage(onProgress, "parsing");
   const asts = AstIndex.build(files);
+
+  stage(onProgress, "history");
   const [git, structural] = await Promise.all([
     options.git ? Promise.resolve(options.git) : GitIndex.build(rootPath),
     StructuralIndex.build(files),
   ]);
+
+  stage(onProgress, "imports");
   const graph = ImportGraph.build(files, asts, rootPath);
+
+  stage(onProgress, "routes");
   const routes = RouteTable.build(files, asts);
   const frameworks = detectFrameworks(files);
   const languages = profileLanguages(files.sourceFiles());
@@ -76,14 +142,20 @@ export async function scanRepository(
   options: ScanOptions,
 ): Promise<ScanResult> {
   const started = Date.now();
-  const ctx = await buildContext(
-    rootPath,
-    options.git ? { git: options.git } : {},
-  );
+  const { onProgress } = options;
+
+  const ctx = await buildContext(rootPath, {
+    ...(options.git ? { git: options.git } : {}),
+    ...(onProgress ? { onProgress } : {}),
+  });
+
+  stage(onProgress, "authorship");
   const authorship = analyzeAuthorship(ctx, options);
   // Health re-weights the structural signals authorship already computed rather
   // than measuring them again — see `analyzers/health/index.ts`.
+  stage(onProgress, "health");
   const health = analyzeHealth(ctx, authorship.score.signals);
+  stage(onProgress, "security");
   const security = await analyzeSecurity(ctx, options);
 
   const warnings = [
@@ -150,13 +222,27 @@ export async function scanRepository(
 export interface GitHubScanOptions
   extends GitHubOptions,
     AuthorshipOptions,
-    SecurityOptions {
+    SecurityOptions,
+    ProgressOptions {
   /**
    * Refuse repositories larger than this, in kilobytes as GitHub reports them.
    * A size gate up front produces an honest error; without one a large repo
    * simply exceeds the platform's function timeout with no explanation.
    */
   maxSizeKb?: number;
+  /**
+   * Repository metadata the caller has already fetched.
+   *
+   * The web app looks this up before deciding whether a stored scan is still
+   * current, and hands the same object straight back here rather than letting
+   * the scan fetch it a second time. Without this the freshness check would add
+   * a request to *every* scan, breaking the three-request budget that keeps a
+   * public deployment inside GitHub's unauthenticated rate limit.
+   *
+   * `assertScannable` still runs on it — the privacy and size gates are not
+   * something a caller gets to skip by supplying its own metadata.
+   */
+  meta?: RepoMeta;
 }
 
 /**
@@ -212,12 +298,13 @@ export async function scanGitHubRepository(
   const started = Date.now();
   const maxSizeKb = options.maxSizeKb ?? 150_000;
 
-  const meta = await fetchRepoMeta(slug, options);
+  const meta = options.meta ?? (await fetchRepoMeta(slug, options));
   assertScannable(meta, maxSizeKb);
 
   const workdir = await mkdtemp(path.join(tmpdir(), "repo-audit-"));
 
   try {
+    stage(options.onProgress, "fetching");
     const [, history] = await Promise.all([
       fetchTarball(slug, workdir, options),
       fetchCommits(slug, options),
@@ -233,10 +320,20 @@ export async function scanGitHubRepository(
       ...(options.structuralOnly ? { structuralOnly: true } : {}),
       ...(options.checkVulnerabilities ? { checkVulnerabilities: true } : {}),
       ...(options.osv ? { osv: options.osv } : {}),
+      ...(options.onProgress ? { onProgress: options.onProgress } : {}),
     });
 
-    // scanRepository times only the analysis; report the whole round trip.
-    return { ...result, durationMs: Date.now() - started };
+    return {
+      ...result,
+      repo: {
+        ...result.repo,
+        // Recorded so a later scan of the same repository can tell whether
+        // anything has moved without analysing it again.
+        ...(meta.pushedAt ? { pushedAt: meta.pushedAt } : {}),
+      },
+      // scanRepository times only the analysis; report the whole round trip.
+      durationMs: Date.now() - started,
+    };
   } finally {
     await rm(workdir, { recursive: true, force: true }).catch(() => {});
   }
