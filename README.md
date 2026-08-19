@@ -134,12 +134,25 @@ so switching between them costs nothing.
 
 ```bash
 pnpm install
-pnpm scan .                              # scan a local directory
-pnpm scan owner/repo                     # scan a GitHub repository
-pnpm report . --persona=founder          # the narrated report
-pnpm vitest run                          # 77 tests
+pnpm audit .                             # the narrated report for a local checkout
+pnpm audit owner/repo                    # …or a public GitHub repository
+pnpm audit . --signals                   # every signal, its weight and its evidence
+pnpm audit --help                        # everything else
+pnpm vitest run                          # the test suite
 pnpm web                                 # the app, on :3000
 ```
+
+`pnpm scan` and `pnpm report` still work; they are aliases for `pnpm audit --signals` and
+`pnpm audit`.
+
+**A local checkout is read at full strength, and the hosted app cannot be.** GitHub's API returns
+per-*commit* totals but no per-*file* changes, and fetching those costs one request per commit —
+enough to exhaust the entire hourly budget on a single scan. So `write-once-files` reports itself
+unavailable on every API-sourced scan, and without a token `commit-size`, `build-velocity` and
+`refactor-ratio` go with it: 23 of 30 points of authorship evidence, which caps confidence at
+*medium*. Scanning the directory on your disk has none of that, reads code that never leaves your
+machine, and is not bounded by a serverless memory limit. The report says which checks ran either
+way.
 
 Both environment variables are optional locally and required in production — see `.env.example`.
 Without `DATABASE_URL` the app keeps scans in memory; without `GITHUB_TOKEN` you share a 60

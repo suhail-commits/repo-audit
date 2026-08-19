@@ -154,7 +154,7 @@ pnpm typecheck       # covers packages AND apps/web
 Additionally, **if a signal, index, or the scorer changed**:
 
 ```bash
-pnpm scan .          # authorship ~17, health ~3, security ~29; see below for which signals fire
+pnpm scan .          # authorship ~17, health ~4, security ~29-31; see below for which signals fire
 pnpm sweep           # median ~5, max under 30, nothing claiming `certain`
 ```
 
@@ -167,8 +167,22 @@ pnpm sweep           # median ~5, max under 30, nothing claiming `certain`
   the only state-changing route in the repo, so the ratio is 1/1. A true measurement of a
   deliberate choice.
 - `missing-license` **1.00** — there is no `LICENSE` file in this repository and `package.json`
-  declares none. Also a true measurement. **Security lands around 29 here and that is the
+  declares none. Also a true measurement. **Security lands around 29–31 here and that is the
   baseline**, not a bug; it was 21 before the licence checks landed.
+
+**Security is the one dimension whose baseline legitimately drifts on its own**, because
+`vulnerable-dependencies` is the only signal that reaches the network and OSV keeps publishing.
+Seen live: 29 one day and 31 the next across an identical 237-package tree, purely because
+`GHSA-2v37-7h3g-55p8` appeared for `nanoid`. **Before treating a security move on this repo as a
+regression, read the advisory list** — `pnpm scan .` prints every one. The arithmetic is easy to
+check by hand: available weight is 15.5, and `unauthenticated-routes` + `missing-license` alone
+contribute 4.5 of it.
+
+`pnpm scan . --offline` reads **35 at medium confidence**, which is *higher*, and that is invariant
+2 rather than a contradiction of it: dropping `vulnerable-dependencies` redistributes its 2.5 across
+the remaining signals, two of which are saturated. A missing signal must never lower the score, and
+here it raises it. Use the online number as the baseline; reach for `--offline` to prove degradation
+works, not to get a stabler figure.
 
 `build-velocity` reports **unavailable** here (one active day is a point, not a span), so does
 `license-mismatch`, which needs both a licence file and a declaration to compare, and so does
@@ -273,11 +287,21 @@ These are load-bearing. Breaking one is a correctness bug, not a style preferenc
 packages/shared   types + score bands       (no dependencies)
 packages/engine   all analysis              (shared)
 packages/rules    report prose, personas    (shared; engine as devDep for tests)
+packages/cli      the terminal product      (all three)
 apps/web          Next.js UI                (all three)
 ```
 
-Dependency direction is one-way: `shared ← engine ← rules ← web`. `engine` must never import
-`rules`.
+Dependency direction is one-way: `shared ← engine ← rules ← {cli, web}`. `engine` must never
+import `rules`.
+
+**`packages/cli` is a fourth leaf, not a home for logic.** It needs *both* engine and rules, so it
+cannot live inside either without inverting the layering — engine must never import rules, and
+rules holds engine only as a devDependency for tests. It contains argument parsing, terminal
+primitives and pure `ScanResult → string` renderers, and nothing else: any prose it needed lives in
+`packages/rules`, and any arithmetic in `packages/shared`, so the terminal and the web report
+cannot describe the same repository differently. It has **no npm dependencies of its own** —
+`util.parseArgs` and `util.styleText` are built in, and `styleText` already honours `NO_COLOR` and
+TTY detection.
 
 ### Engine pipeline
 
@@ -333,14 +357,24 @@ complete `ScanResult`.
 pnpm vitest run                          # all tests
 pnpm typecheck                           # tsc -b
 pnpm sweep                               # false-positive sweep over known hand-written repos
-pnpm scan <path>                         # raw signal breakdown (dev tool)
-pnpm scan <path> --structural-only       # ground-truth signals disabled, as calibration runs
-pnpm report <path> --persona=founder     # the narrated report
+pnpm audit <path|owner/repo|url>         # the narrated report
+pnpm audit <path> --signals              # raw signal breakdown (the calibration view)
+pnpm audit <path> --structural-only      # ground-truth signals disabled, as calibration runs
+pnpm audit <path> --persona=founder      # a different reader
+pnpm audit --selftest                    # which parsers and grammars actually loaded
+pnpm scan / pnpm report                  # aliases, kept so the gate below is unchanged
 pnpm web                                 # Next.js dev server
 ```
 
+**Health moved 2 → 4 when the landing page and the CLI landed, and that is a true measurement.**
+The whole of it is `test-coverage` at 0.24 — 27 test files against 85 source files. Six landing
+components and the CLI's renderers are source files with no test file of their own, so the ratio
+really did move. No signal changed: the sweep came back byte-identical (median 5, max 24, security
+clean across 20), which is the control for exactly this question.
+
 **`pnpm scan .` on this repo is the fastest sanity check.** Authorship lands around 17, health
-around 3 and security around 29, with exactly four signals above zero — `agent-tooling`,
+around 2 and security around 29–31 (it drifts with live OSV data — see *The gate*), with exactly
+four structural signals above zero — `agent-tooling`,
 `commit-size`, `unauthenticated-routes` and `missing-license` — and `build-velocity`,
 `license-mismatch` and `refactor-ratio` correctly reporting unavailable. See *The gate* for why each
 is a true measurement. A **fifth** signal firing on our own hand-written code is a false positive to
@@ -368,7 +402,14 @@ pasting their own repo and getting an obviously wrong answer. Its first run foun
 false positives, all listed below. Clones are full, not shallow — a shallow clone compresses the
 active-day span and makes `build-velocity` fire spuriously.
 
-Current baseline: **median 5, max 25 across 20 repos, none above 30, none claiming `certain`.**
+Current baseline: **median 5, max 24 across 20 repos, none above 30, none claiming `certain`.**
+Health reads **median 14, max 42**. The health median is decided by a single repository —
+`debug-js/debug` sits at rank 10 — and its whole score is `test-coverage` at 0.667, so that one
+number moves the corpus median on its own. It read 13 once early in the CLI work and 14 on three
+consecutive runs afterwards, including one with the resolver change reverted, so **the move is not
+attributable to any signal and was not reproduced**; it is recorded here rather than explained.
+Authorship and security were byte-identical across all four runs, which is what the sweep is
+actually the control for.
 The median moved 6 → 5 when `refactor-ratio` landed: a sixteenth signal redistributes weight across
 every score, so absolute numbers shift even where nothing about an existing signal changed.
 
@@ -568,6 +609,86 @@ Each was a confidently-wrong result that looked correct until tested against rea
   exists to read is the one the index cannot see".** When adding a check, confirm its input is
   indexed before trusting that it found nothing.
 
+- **A truncated scan analysed whichever files the walk happened to reach first.** `walkRepo`
+  applied the file-count and byte caps *during* traversal and returned early — **before** the
+  `files.sort()` at the bottom of the function. So on any repository large enough to truncate, the
+  surviving subset was an artifact of `readdir` order, and two scans of the same repository on
+  different filesystems could analyse different files and produce different scores. The README's
+  central claim is that the same repository always produces the same report. Candidates are now
+  collected, sorted, and *then* capped, so the subset is a deterministic prefix. Found by reading
+  the walk while auditing memory, not by any test — and the regression test was confirmed to fail
+  against the old shape before being kept.
+
+- **The size gate measured the git object store and the memory ceiling was five times too high.**
+  `maxTotalBytes` was 150 MB, chosen as "generous for real source trees" with nothing measured.
+  Source bytes are nowhere near the peak: `FileIndex` retains every file's content as a UTF-16
+  string while `AstIndex` and `StructuralIndex` hold a tree per file, all live at once. Measured
+  with `--expose-gc`: `p-limit` 0.2 MB source → 93 MB RSS, `zod` 3 MB → 286 MB, `facebook/react`
+  36 MB → 583 MB. That is a ~90 MB floor plus ~14 MB of RSS per MB of source, so the old cap
+  permitted a scan needing over 2 GB on a platform giving about 1 GB — **the gate that exists to
+  produce an honest refusal instead produced an out-of-memory kill with no message.** Now 40 MB,
+  which admits `facebook/react` whole. Separately, `MAX_REPO_KB` gates on GitHub's reported repo
+  size, which is packed git history and relates only loosely to how much source is read; it is
+  documented as a cheap pre-filter rather than the limit.
+
+- **Truncation never reached the score.** `FileIndex.truncated` produced a warning string and
+  nothing else, so a repository where a fifth of the files were read reported the *same*
+  confidence as one read completely — every signal "available", coverage 100%, `high`. Signal
+  coverage measures how many checks ran, not how much they ran over. A truncated scan now caps
+  every dimension at `low` and says why. It caps rather than scales because the honest quantity is
+  unknown: the walk stops when a cap is hit, so we never learn how much was left, and a ratio
+  would be a fabricated denominator.
+
+- **`schemaVersion` was written and never read.** Four references repo-wide: one write, one type
+  declaration, two test fixtures. Meanwhile the report called `.includes()` directly on
+  `analysedDimensions` — a *required* field added long after the first rows were stored. Results
+  are persisted as jsonb and read back by whatever code is deployed later, so a row is an instance
+  of whatever the interface was the day it was written, and TypeScript cannot tell. The identical
+  crash already happened once with `focus`, and the fix then was applied to that one field rather
+  than to the class. `readScanResult` is now the single read path: it fills defaults for
+  everything added since v1, and *refuses* a row missing `repo` or `scores` rather than rendering
+  an empty report about a repository nothing was measured on.
+
+- **The coverage tests claimed a dimension they did not check.** `narrator.test.ts` asserted
+  "Every dimension that carries a score, not just authorship" in a comment and then built its list
+  from authorship and health only, so security's seven signals and six rules were guarded by
+  nothing — and `analyzeSecurity` was not even exported from the engine's public API. Nothing was
+  actually missing behind the gap, which is the point: the guard was absent, not the prose.
+  **The first fixture written to close it passed while measuring nothing** — the AWS key was
+  written as `"AKIA" + "QRST…"` *inside* the fixture's file text, so it reached disk with the
+  prefix split and matched no pattern. The test now names every rule it requires rather than
+  counting them.
+
+- **The rate limiter counted results, so the cheap path went uncounted.** It counted rows in
+  `scans`, and both cached branches of `POST /api/scans` return *before* a row is written — so
+  cached hits never incremented the counter however many arrived. Measured on a running server:
+  **12 consecutive cached hits against a burst ceiling of 5, every one allowed**, each
+  out-of-window hit spending exactly one GitHub request (`x-ratelimit-remaining` 48 → 43 over five
+  hits) charged to nobody. An attacker looping over already-scanned repositories could drain the
+  whole quota with the counter never moving. Found by instrumenting the endpoint I had just
+  written, not by any test — and the five-minute window that makes in-window hits free (48 → 48
+  over ten hits) hid the shape of it, because the common case really is free. Fixed by counting
+  attempts in a `request_log` table instead of results in `scans`, and by booking the estimated
+  cost *before* the work rather than after. **A limiter that counts what succeeded cannot see what
+  was asked for.**
+
+- **The bundler compiled the grammar resolver into a `throw`, and every deployed scan of a Python,
+  Go or Rust repository was wrong.** `grammarPath` assembled its specifier at runtime —
+  `["tree-sitter-wasms","out",name].join("/")` — specifically so Turbopack would not try to bundle
+  a `.wasm`. It stopped the bundling and then Turbopack replaced the `require.resolve` call itself
+  with `function(){ let e = Error("Cannot find module as expression is too dynamic"); throw
+  (e.code="MODULE_NOT_FOUND"), e }()`. So in **any** production build the resolve never ran, the
+  `catch` at `getParser` swallowed it, and `StructuralIndex` reported the language unavailable.
+  Seen on `psf/requests` through `next build && next start`: *"python grammar unavailable; those
+  files were not analyzed structurally"*. `grammarPath` now tries module resolution and, when it has
+  been compiled away, walks up from `process.cwd()` looking for the file on disk — the working
+  directory being the one anchor a bundler cannot move. After the fix the same scan reports 23 of
+  236 functions duplicated, which is unreachable without the grammar actually parsing.
+  **No test caught this and no test can**: vitest runs unbundled source, so the only thing that
+  reproduces it is building the app and scanning a non-JS repository. Third entry in the
+  `import.meta`-once-bundled family, and the first where the workaround for one bundler problem
+  *created* the next one.
+
 The pattern: **a signal that cannot see something reports its absence as a finding.** When adding a
 signal, ask what it looks like on a codebase that legitimately does things differently.
 
@@ -631,7 +752,7 @@ Kept so nobody spends the afternoon again.
 
 ## Current state
 
-Built and passing (244 tests): GitHub API ingest, index layer, 16 authorship signals, an 8-signal
+Built and passing (278 tests): GitHub API ingest, index layer, 16 authorship signals, an 8-signal
 health dimension (calibrated), a 7-signal security dimension,
 tiered multi-language analysis, scoring, narrator with three personas, and a Vercel-ready web app
 that scans inline with no worker or queue.
@@ -731,12 +852,77 @@ can render an unbuilt section as "not analysed yet" instead of as a pass. **Add 
 that array in the same commit that registers its analyzer**; a section that ran and found nothing
 is otherwise indistinguishable from one that never looked.
 
+### The request boundary
+
+**The engine's architecture is strong and the ~90 lines between HTTP and `scanRepository()` were
+thin.** Everything below was added there, and none of it touches an analyzer — which is why the
+sweep is the control: it came back byte-identical (median 5, max 24, security clean across 20).
+
+**A repeat scan is answered without re-running one.** `POST /api/scans` used to be anonymous,
+uncached and unlimited, spending a tarball download, three GitHub requests, an OSV lookup and up to
+a minute of CPU every time — with `latestScanFor(slug)` already sitting in the db layer, used only
+by the badge. There are now two gates before a scan starts:
+
+- Inside **five minutes**, a stored scan is served with **no external call at all**. This is not
+  only latency: the rate limiter counts rows, and the cached branch returns before writing one, so
+  without this window cached hits would never increment the counter however many arrived.
+- Beyond it, **`pushed_at` decides**, and it is keyed on that rather than the head SHA *for cost*.
+  `fetchRepoMeta` already runs first for the privacy and size gates, so comparing it is free, while
+  a SHA needs its own request on every scan and would break the three-request budget. `pushed_at`
+  also fails in the safe direction — it moves on a push to any branch, so it can force an
+  unnecessary re-scan but can never serve a superseded revision. Measured: 5.37s → 0.04s.
+  **`scanGitHubRepository` therefore accepts a pre-fetched `RepoMeta`**, which is what keeps a
+  cache *miss* at three requests rather than four. `assertScannable` still runs on it — a caller
+  does not get to skip the privacy gate by supplying its own metadata.
+
+**Two rate limits, protecting different things.** The burst one is per caller and counts *every*
+request whatever it cost, because it exists to stop one visitor hammering the endpoint and a cheap
+request is still a request. The hourly one is global and counts **GitHub requests spent**, not
+calls answered — it guards a quota belonging to the deployment's token rather than to any caller,
+so a per-caller limit could not protect it, and counting calls instead of spend would refuse real
+scans on the strength of cache hits that cost nothing. Neither uses an in-process map: serverless
+invocations share no memory, so a module-level counter limits each cold instance separately and
+therefore limits nothing.
+
+**They count `request_log`, not `scans`, and that distinction was a measured bug rather than a
+design preference.** The first version counted stored scans — which is to say it counted
+*results* — and both cached branches return before a result exists. Measured on a running server:
+**12 consecutive cached hits against a ceiling of 5, every one allowed**, and each out-of-window
+hit spending exactly one GitHub request (48 → 43 over five hits) charged to nobody. A limiter that
+counts results cannot see the requests that produced no result. `request_log` records one row per
+request that got past validation, with the GitHub requests it booked.
+
+**The cost is booked before the work, not after.** Booking on the way out would let several
+concurrent callers all pass the check and then all start a scan, which is the case the ceiling most
+exists to prevent. `estimateSpend` is exact at both ends — 0 inside the recheck window, 3 for a
+real scan — and deliberately pessimistic in between: a stored scan past the window whose repository
+has not moved really costs 1, but is booked at 3 because which it will be is unknowable until that
+request returns. **Over-booking is the safe direction**; refunding the difference afterwards would
+reintroduce exactly the gap this replaced.
+
+Curated examples never come through this path — `seed-examples.ts` calls `createScan` directly — so
+seeding the landing page cannot spend the public budget. The caller is a **salted hash of the
+address, never the address**, taken from the *front* of `x-forwarded-for` since everything after it
+is a proxy. Unsalted it is not anonymous at all, the IPv4 space being four billion entries that
+reverse by brute force, so with no `RATE_LIMIT_SALT` set every caller collapses into one bucket —
+which fails toward limiting *more*.
+
+**Every read of a stored `ScanResult` goes through `readScanResult`.** See *Bugs worth remembering*
+for why. Anything added to `ScanResult` from now on declares its default there, in one place,
+rather than relying on someone remembering to mark the field optional.
+
 ### Deployment shape
 
 Everything runs on Vercel. There is **no `git` binary, no worker, no queue, and no persistent
 filesystem** — the tarball is fetched over HTTP into `/tmp` and scanned inline within one request.
-`DATABASE_URL` (Neon) and `GITHUB_TOKEN` are the only configuration; both are optional locally and
-required in production. See `.env.example`.
+`DATABASE_URL` (Neon), `GITHUB_TOKEN` and `RATE_LIMIT_SALT` are the configuration; all three are
+optional locally and required in production. See `.env.example`.
 
 `/tmp` is used rather than an in-memory filesystem because `ImportGraph` resolves through
 `oxc-resolver`, which performs real filesystem lookups.
+
+**A scan's real ceiling is memory, not time.** `LIMITS.maxTotalBytes` (40 MB of indexed source) is
+the number that decides whether a repository fits in the function, measured rather than guessed —
+see *Bugs worth remembering*. Past it the walk truncates deterministically and every dimension
+drops to `low` confidence, which is a worse report but an honest one; the alternative it replaced
+was an out-of-memory kill with no message.
