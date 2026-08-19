@@ -3,6 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 
+import { STAGES } from "@/lib/stages";
+
 /**
  * The form asks for a repository and nothing else.
  *
@@ -16,30 +18,14 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
  * already worked out. The report now shows all three, and the only thing left
  * to ask is which repository.
  */
-
-/**
- * The scan runs inline, so the request can take several seconds. These describe
- * what is genuinely happening, in the order it happens, so the wait reads as
- * progress rather than a hang.
- */
-const STAGES = [
-  "Fetching the repository…",
-  "Reading the commit history…",
-  "Parsing every source file…",
-  "Looking for duplicated logic…",
-  // Named now that the report leads with all three checks rather than one. A
-  // wait that only mentions duplication makes the security section look like
-  // something we bolted on after the fact.
-  "Checking for exposed keys and open routes…",
-  "Weighing the evidence…",
-];
-
 export function StartScanForm() {
   const router = useRouter();
   const [repo, setRepo] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [stage, setStage] = useState(0);
+  /** Replaces the staged progress line when there was nothing to re-run. */
+  const [notice, setNotice] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -51,6 +37,7 @@ export function StartScanForm() {
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
     setError(null);
+    setNotice(null);
 
     if (repo.trim() === "") {
       setError("Paste a GitHub repository to analyse.");
@@ -69,12 +56,26 @@ export function StartScanForm() {
 
     try {
       const response = await fetch("/api/scans", { method: "POST", body });
-      const payload = (await response.json()) as { id?: string; error?: string };
+      const payload = (await response.json()) as {
+        id?: string;
+        error?: string;
+        cached?: boolean;
+      };
 
       if (!response.ok || !payload.id) {
         setError(payload.error ?? "Could not analyse that repository.");
         setBusy(false);
         return;
+      }
+      /*
+       * A cached hit lands instantly, which without a word reads as the scan
+       * having been suspiciously fast rather than as it having been skipped.
+       * Say which one it was — the report is real either way, it is just not
+       * new.
+       */
+      if (payload.cached) {
+        setStage(STAGES.length - 1);
+        setNotice("This repository hasn't changed since it was last scanned — opening that report.");
       }
       // Stay busy through the navigation so the button cannot be pressed twice
       // while the report page loads.
@@ -113,7 +114,7 @@ export function StartScanForm() {
 
       {busy ? (
         <p className="status-line" aria-live="polite">
-          {STAGES[stage]}
+          {notice ?? STAGES[stage]}
         </p>
       ) : null}
 

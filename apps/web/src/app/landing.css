@@ -1,0 +1,735 @@
+/* ==========================================================================
+   Landing page — the film
+   ==========================================================================
+
+   Kept out of globals.css because none of it is global. Every rule is scoped to
+   the landing page, and the report shares almost every component animated here.
+   None of this may follow them there: a report is a document people scan and
+   compare, and pinning it to the viewport would cost the one thing it is for.
+
+   The choreography is CSS driven by variables the scene components publish each
+   frame — --z, --o, --s, --blur, --head and --p. That split is what lets
+   ModuleMap, SignalBreakdown, ScoreScale and Priorities stay server components:
+   their internals animate without importing them into the client bundle, and
+   without a landing-only copy of each that would drift from the real one.
+   ========================================================================== */
+
+/* Registered so they interpolate and can be used inside calc(). Undeclared they
+   are bare strings and every calc() below silently fails. */
+@property --z {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+@property --o {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 1;
+}
+@property --s {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 1;
+}
+@property --blur {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+@property --head {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 1;
+}
+@property --p {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+/* --- the page is a stage, not a document -------------------------------- */
+
+/*
+ * The 60rem shell every other page lives in is dropped here.
+ *
+ * Done with :has() rather than a 100vw bleed, because a `width: 100vw` element
+ * is wider than the viewport whenever a classic scrollbar is present — the
+ * default on Windows — and would put a horizontal scrollbar on the one page
+ * that most needs to feel composed.
+ */
+body:has(.landing) .shell {
+  max-width: none;
+  padding: 0;
+}
+
+/* Scrollbar hidden so the scenes read as full-bleed. Taking it away removes the
+   only cue for how much is left, so `ScrollRail` puts that back as a hairline —
+   see the component for why it is not simply deleted. */
+body:has(.landing) {
+  scrollbar-width: none;
+}
+body:has(.landing)::-webkit-scrollbar {
+  display: none;
+}
+
+/* Fixed to a corner the way the reference keeps its UI at the edges. NOT
+   mix-blend-mode: multiply, which was tried and is invisible against the dark
+   palette — a blend mode that depends on a light ground is not a colour
+   scheme-agnostic choice. */
+body:has(.landing) .masthead {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 40;
+  margin: 0;
+  padding: var(--sp-4) var(--sp-5);
+  color: var(--text-secondary);
+}
+
+body:has(.landing) .masthead .tagline {
+  display: none;
+}
+
+@media (min-width: 900px) {
+  body:has(.landing) .masthead .tagline {
+    display: inline;
+  }
+}
+
+.scroll-rail {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  z-index: 50;
+  width: 100%;
+  height: 2px;
+  transform-origin: 0 50%;
+  background: var(--accent);
+}
+
+.landing {
+  --landing-max: 78rem;
+
+  /* Display type, landing-only.
+
+     Deliberately NOT the scale-to-fit trick the reference uses
+     (html { font-size: clamp(...vw...) }). That overrides the reader's own
+     browser font-size preference, and moving the root size would move every
+     number on the report too. clamp() on the few elements that want to be
+     enormous buys the same look and costs nobody their settings. */
+  --display-1: clamp(2.4rem, min(8vw, 12vh), 9rem);
+  --display-2: clamp(1.9rem, min(5.5vw, 8.5vh), 5rem);
+
+  /* How far consecutive scenes are pulled over each other. The arrive/depart
+     breakpoints in Act.tsx and Hero.tsx are this expressed as a fraction of the
+     rail — change one and the other has to move with it. */
+  --scene-overlap: 100vh;
+
+  position: relative;
+}
+
+/*
+ * One continuous ground behind every scene.
+ *
+ * Fixed rather than per-section, so scenes appear to travel through a single
+ * space instead of each carrying its own backdrop. This is the cheapest part of
+ * the reference's feel to reproduce and it does a lot of the work.
+ */
+.landing::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(
+      70% 55% at 50% 8%,
+      color-mix(in oklab, var(--accent) 9%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      60% 50% at 85% 95%,
+      color-mix(in oklab, var(--accent) 6%, transparent),
+      transparent 70%
+    ),
+    var(--bg);
+}
+
+/* --- scenes -------------------------------------------------------------- */
+
+.scene {
+  position: relative;
+}
+
+/*
+ * Consecutive scenes are pulled over one another so one arrives across exactly
+ * the span the previous one is leaving.
+ *
+ * Without this there is a blank frame between every act: a scene's rail ends,
+ * taking its pinned stage with it, and the next scene's stage does not begin
+ * arriving until its own rail starts. Measured at 1600x900 the gap was most of
+ * a viewport of empty scrolling, which reads as the page having broken rather
+ * than as a transition.
+ *
+ * The arriving scene sits above the departing one, which is the right way
+ * round: the one leaving is blurred and fading, so it belongs behind the one
+ * coming into focus.
+ */
+.scene + .scene {
+  margin-top: calc(var(--scene-overlap) * -1);
+}
+
+/* The rail supplies the scroll distance the pinned stage is scrubbed across.
+   Longer than a viewport on purpose: the hold in the middle is what makes a
+   scene readable rather than something that flies past. */
+.scene-rail {
+  height: 320vh;
+}
+
+.scene-rail-hero {
+  height: 200vh;
+}
+
+.scene-stage {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-block: var(--sp-6);
+  /* Real perspective, not a scale. A card that grows reads as a card growing;
+     a card on a Z axis reads as a card approaching. */
+  perspective: 1400px;
+  perspective-origin: 50% 50%;
+  overflow: hidden;
+}
+
+.scene-depth {
+  width: 100%;
+  max-width: var(--landing-max);
+  padding: 0 var(--sp-5);
+  transform: translateZ(calc(var(--z) * 1px)) scale(var(--s));
+  opacity: var(--o);
+  filter: blur(calc(var(--blur) * 1px));
+  will-change: transform, opacity, filter;
+}
+
+/* --- scene furniture ----------------------------------------------------- */
+
+.act-head {
+  max-width: 30ch;
+  margin-bottom: var(--sp-6);
+  /* Trails the surface slightly so the composition has depth within itself
+     rather than arriving as one flat plane. Scaled from its own centre, NOT
+     translated on Y — a vertical offset here made every scene look like it rose
+     from the bottom of the screen instead of opening out of the middle. */
+  transform: scale(var(--head));
+  transform-origin: center;
+}
+
+.act-index {
+  display: block;
+  font-family: var(--mono);
+  font-size: var(--step--1);
+  letter-spacing: 0.18em;
+  color: var(--accent);
+  margin-bottom: var(--sp-4);
+}
+
+.act-title {
+  font-size: var(--display-2);
+  line-height: 0.94;
+  letter-spacing: -0.045em;
+  font-weight: 680;
+  margin: 0 0 var(--sp-4);
+  text-wrap: balance;
+}
+
+.act-lede {
+  font-size: var(--step-1);
+  line-height: 1.45;
+  color: var(--text-secondary);
+  max-width: 46ch;
+  margin: 0;
+}
+
+.act-surface {
+  max-height: 46vh;
+  overflow: auto;
+  scrollbar-width: none;
+}
+
+.act-surface::-webkit-scrollbar {
+  display: none;
+}
+
+@media (min-width: 900px) {
+  /* Wide enough to set the heading against the surface rather than above it,
+     which is what stops each scene reading as a stacked document slide. */
+  .scene-depth[data-surface]:not([data-surface="plain"]) {
+    display: grid;
+    grid-template-columns: minmax(0, 26rem) minmax(0, 1fr);
+    gap: clamp(2rem, 5vw, 5rem);
+    align-items: center;
+  }
+
+  .act-head {
+    margin-bottom: 0;
+  }
+
+  .act-surface {
+    max-height: 68vh;
+  }
+}
+
+/* --- hero ---------------------------------------------------------------- */
+
+.hero-eyebrow {
+  font-family: var(--mono);
+  font-size: var(--step--1);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin: 0 0 var(--sp-5);
+}
+
+.hero-display {
+  font-size: var(--display-1);
+  line-height: 0.9;
+  letter-spacing: -0.05em;
+  font-weight: 700;
+  max-width: 14ch;
+  margin: 0 0 var(--sp-5);
+  text-wrap: balance;
+}
+
+/* The decoding phrase. Tabular figures so the line does not reflow as glyphs
+   resolve — a headline that jitters while it settles reads as broken rather
+   than as an effect. */
+.hero-scramble {
+  color: var(--accent);
+  font-variant-ligatures: none;
+}
+
+.hero-scramble .scramble-glyphs {
+  font-variant-numeric: tabular-nums;
+}
+
+.hero-sub {
+  font-size: var(--step-1);
+  color: var(--text-secondary);
+  max-width: 48ch;
+  margin: 0 0 var(--sp-6);
+}
+
+.hero-form {
+  max-width: 40rem;
+}
+
+.hero-cue {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin: var(--sp-6) 0 0;
+  font-family: var(--mono);
+  font-size: var(--step--1);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.hero-cue-rule {
+  width: 3rem;
+  height: 1px;
+  background: var(--border-strong);
+}
+
+/* --- act 01: what a scan does -------------------------------------------- */
+
+.stage-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+}
+
+.stage-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-4);
+  padding: var(--sp-4) 0;
+  border-bottom: 1px solid var(--border);
+  /* Dealt out by scroll rather than on arrival, so the list fills as the scene
+     is held rather than completing before it has settled. */
+  opacity: calc((var(--p) * 7) - var(--row));
+  transform: translateX(calc((1 - var(--p)) * 22px));
+}
+
+.stage-row:nth-child(1) { --row: 0; }
+.stage-row:nth-child(2) { --row: 0.7; }
+.stage-row:nth-child(3) { --row: 1.4; }
+.stage-row:nth-child(4) { --row: 2.1; }
+.stage-row:nth-child(5) { --row: 2.8; }
+.stage-row:nth-child(6) { --row: 3.5; }
+
+.stage-num {
+  font-family: var(--mono);
+  font-size: var(--step--1);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.stage-label {
+  font-size: var(--step-2);
+  letter-spacing: -0.02em;
+}
+
+.stage-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--border-strong);
+  align-self: center;
+}
+
+/* --- act 02: the module graph draws itself ------------------------------- */
+
+/*
+ * pathLength="1" on every edge is what makes this work: the dash length is
+ * expressed in the line's own units, so one rule draws a short edge and a long
+ * one at the same rate. Without it the dasharray would be a pixel guess, and
+ * any line longer than the guess would stay invisible until the very end.
+ */
+/*
+ * Both of these were measured clipping at 1600x900 and fixed rather than left.
+ *
+ * The signal list matters most: it is 16 rows, and what fell off the bottom was
+ * the two *unavailable* ones — the rows that exist to show a missing signal
+ * lowering confidence rather than scoring zero. Cropping exactly those turns the
+ * scene into an argument for the opposite of what the project claims, so the
+ * rows are compressed until all sixteen fit rather than the list being trimmed.
+ */
+[data-surface="signals"] .signal {
+  padding-block: 0.28rem;
+  font-size: var(--step--1);
+}
+
+[data-surface="signals"] .section-head {
+  margin-bottom: var(--sp-3);
+}
+
+/* An unavailable row carries a sentence rather than a bar, so it is the one
+   that wraps and pushes the list past the fold. */
+[data-surface="signals"] .signal-absent-reason {
+  font-size: 0.78rem;
+}
+
+/* The graph is laid out at its natural size by ModuleMap; let it scale down to
+   the scene rather than lose its bottom row of directories. */
+[data-surface="graph"] .module-map svg {
+  max-height: 62vh;
+  width: auto;
+  height: auto;
+}
+
+[data-surface="graph"] .module-edge {
+  stroke-dasharray: 1;
+  stroke-dashoffset: calc(1 - var(--p));
+}
+
+[data-surface="graph"] .module-node,
+[data-surface="graph"] .module-node-label,
+[data-surface="graph"] .module-node-meta {
+  opacity: calc(var(--p) * 1.6);
+}
+
+/* --- act 03: the bars grow ----------------------------------------------- */
+
+[data-surface="signals"] .signal-fill {
+  transform: scaleX(var(--p));
+  transform-origin: left center;
+}
+
+[data-surface="signals"] .signal-points {
+  opacity: var(--p);
+}
+
+/* --- act 04: the scale reveals ------------------------------------------- */
+
+/*
+ * The track is wiped in from the left, uncovering the marker at the moment the
+ * wipe reaches its position — which reads as the marker travelling to its score
+ * without animating `left`, whose value is inline-styled by ScoreScale and
+ * belongs to that component rather than to this page.
+ */
+[data-surface="score"] .scale-track {
+  clip-path: inset(0 calc((1 - var(--p)) * 100%) 0 0);
+}
+
+[data-surface="score"] .score-value {
+  font-size: var(--display-2);
+  line-height: 1;
+}
+
+/* --- act 05: the shortlist ----------------------------------------------- */
+
+[data-surface="priorities"] .priority-list > li {
+  opacity: calc((var(--p) * 6) - var(--row));
+  transform: translateX(calc((1 - var(--p)) * -18px));
+}
+
+[data-surface="priorities"] .priority-list > li:nth-child(1) { --row: 0; }
+[data-surface="priorities"] .priority-list > li:nth-child(2) { --row: 0.8; }
+[data-surface="priorities"] .priority-list > li:nth-child(3) { --row: 1.6; }
+[data-surface="priorities"] .priority-list > li:nth-child(4) { --row: 2.4; }
+[data-surface="priorities"] .priority-list > li:nth-child(5) { --row: 3.2; }
+
+/* --- act 06: what it cannot see ------------------------------------------ */
+
+.blindspot-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--sp-4);
+  grid-template-columns: 1fr;
+}
+
+.blindspot {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--sp-5);
+  background: color-mix(in oklab, var(--surface) 82%, transparent);
+  backdrop-filter: blur(6px);
+}
+
+.blindspot h3 {
+  font-size: var(--step-1);
+  margin: 0 0 var(--sp-3);
+  letter-spacing: -0.015em;
+}
+
+.blindspot p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--step-0);
+}
+
+@media (min-width: 640px) {
+  .blindspot-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* --- coda: back to a normal page ----------------------------------------- */
+
+/*
+ * The film ends here. Examples and the closing form scroll normally, are not
+ * pinned, and are not animated — someone who has scrolled this far is looking
+ * for a link to click, and pinning that would be the effect outstaying its
+ * argument.
+ */
+.coda {
+  max-width: var(--landing-max);
+  margin-inline: auto;
+  padding: clamp(4rem, 10vh, 7rem) var(--sp-5);
+  border-top: 1px solid var(--border);
+}
+
+.coda h2 {
+  font-size: var(--display-2);
+  line-height: 0.98;
+  letter-spacing: -0.04em;
+  font-weight: 680;
+  margin: 0 0 var(--sp-4);
+  text-wrap: balance;
+}
+
+.coda .act-lede {
+  margin-bottom: var(--sp-6);
+}
+
+.coda-form {
+  max-width: 40rem;
+}
+
+/* --- narrow -------------------------------------------------------------- */
+
+@media (max-width: 899px) {
+  .scene-rail {
+    height: 260vh;
+  }
+
+  .act-head {
+    max-width: none;
+    margin-bottom: var(--sp-5);
+  }
+
+  .act-surface {
+    max-height: 44vh;
+  }
+
+  .stage-label {
+    font-size: var(--step-1);
+  }
+}
+
+/* --- no scripting -------------------------------------------------------- */
+
+/*
+ * Without scripting the scene variables are never published, so everything
+ * would sit at its initial value — --o is 1 and --p is 0, which would render
+ * every surface empty. The form needs JavaScript regardless, but a page showing
+ * empty frames is a different class of broken from one showing no motion.
+ */
+@media (scripting: none) {
+  /* The overlap exists so pinned scenes can cross-dissolve. With the stages
+     un-pinned below, leaving it applied stacks every scene on top of the one
+     before it — verified by rendering with the preference forced, where the
+     hero landed on top of act 01. */
+  .scene + .scene {
+    margin-top: 0;
+  }
+
+  .scene-rail,
+  .scene-rail-hero {
+    height: auto;
+  }
+
+  .scene-stage {
+    position: static;
+    height: auto;
+    padding-block: var(--sp-8);
+    overflow: visible;
+  }
+
+  .scene-depth {
+    transform: none;
+    opacity: 1;
+    filter: none;
+  }
+
+  .act-head {
+    transform: none;
+  }
+
+  .stage-row,
+  [data-surface="priorities"] .priority-list > li {
+    opacity: 1;
+    transform: none;
+  }
+
+  /*
+ * Both of these were measured clipping at 1600x900 and fixed rather than left.
+ *
+ * The signal list matters most: it is 16 rows, and what fell off the bottom was
+ * the two *unavailable* ones — the rows that exist to show a missing signal
+ * lowering confidence rather than scoring zero. Cropping exactly those turns the
+ * scene into an argument for the opposite of what the project claims, so the
+ * rows are compressed until all sixteen fit rather than the list being trimmed.
+ */
+[data-surface="signals"] .signal {
+  padding-block: 0.28rem;
+  font-size: var(--step--1);
+}
+
+[data-surface="signals"] .section-head {
+  margin-bottom: var(--sp-3);
+}
+
+/* An unavailable row carries a sentence rather than a bar, so it is the one
+   that wraps and pushes the list past the fold. */
+[data-surface="signals"] .signal-absent-reason {
+  font-size: 0.78rem;
+}
+
+/* The graph is laid out at its natural size by ModuleMap; let it scale down to
+   the scene rather than lose its bottom row of directories. */
+[data-surface="graph"] .module-map svg {
+  max-height: 62vh;
+  width: auto;
+  height: auto;
+}
+
+[data-surface="graph"] .module-edge {
+    stroke-dashoffset: 0;
+  }
+
+  [data-surface="graph"] .module-node,
+  [data-surface="graph"] .module-node-label,
+  [data-surface="graph"] .module-node-meta,
+  [data-surface="signals"] .signal-points {
+    opacity: 1;
+  }
+
+  [data-surface="signals"] .signal-fill {
+    transform: none;
+  }
+
+  [data-surface="score"] .scale-track {
+    clip-path: none;
+  }
+}
+
+/* --- reduced motion ------------------------------------------------------ */
+
+/*
+ * The scene components already hand every variable its finished value when the
+ * preference is set, so the scrubbed states resolve to "done" rather than "not
+ * started". What is left is the pinning itself: holding a reader in place for
+ * three viewports of scroll is motion sickness for exactly the people who asked
+ * not to have any. The rails collapse and the page becomes a plain document.
+ */
+@media (prefers-reduced-motion: reduce) {
+  /* The overlap exists so pinned scenes can cross-dissolve. With the stages
+     un-pinned below, leaving it applied stacks every scene on top of the one
+     before it — verified by rendering with the preference forced, where the
+     hero landed on top of act 01. */
+  .scene + .scene {
+    margin-top: 0;
+  }
+
+  .scene-rail,
+  .scene-rail-hero {
+    height: auto;
+  }
+
+  .scene-stage {
+    position: static;
+    height: auto;
+    padding-block: clamp(3rem, 8vh, 6rem);
+    overflow: visible;
+    perspective: none;
+  }
+
+  .scene-depth {
+    transform: none;
+    opacity: 1;
+    filter: none;
+  }
+
+  .act-head {
+    transform: none;
+  }
+
+  .act-surface {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .stage-row,
+  [data-surface="priorities"] .priority-list > li {
+    opacity: 1;
+    transform: none;
+  }
+
+  body:has(.landing) {
+    scrollbar-width: auto;
+  }
+
+  /* The real scrollbar is back, so this would be a second indicator of the
+     same thing. Hidden here rather than by not rendering it — see ScrollRail. */
+  .scroll-rail {
+    display: none;
+  }
+}
