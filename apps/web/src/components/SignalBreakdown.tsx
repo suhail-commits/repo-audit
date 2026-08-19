@@ -1,5 +1,5 @@
 import { signalLabel } from "@vibe/rules";
-import type { DimensionScore, Persona } from "@vibe/shared";
+import { contributions, type DimensionScore, type Persona } from "@vibe/shared";
 
 /**
  * Why the score is what it is, one bar per signal.
@@ -25,19 +25,16 @@ export function SignalBreakdown({
   score: DimensionScore;
   persona: Persona;
 }) {
-  const available = score.signals.filter((s) => s.available);
-  const totalWeight = available.reduce((sum, s) => sum + s.weight, 0);
-
   if (score.signals.length === 0) return null;
 
-  const rows = score.signals.map((signal) => {
-    const maxPoints = totalWeight > 0 ? (signal.weight / totalWeight) * 100 : 0;
-    return {
-      ...signal,
-      points: signal.available ? maxPoints * signal.value : 0,
-      maxPoints,
-    };
-  });
+  // The arithmetic lives in `@vibe/shared` because the CLI prints the same
+  // rows. Two copies would let one repository report two different point
+  // totals depending on which surface you read it on.
+  const rows = contributions(score.signals).map((c) => ({
+    ...c.signal,
+    points: c.points,
+    maxPoints: c.maxPoints,
+  }));
 
   // Scale every track to the largest share any single signal could contribute,
   // so bar lengths are comparable across rows rather than each self-normalised.

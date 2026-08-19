@@ -172,3 +172,47 @@ export function hotspotCaveat(count: number, persona: Persona): string {
     `file by file. It shows the order, not a score for each folder.`
   );
 }
+
+/**
+ * What the number under a heading is measuring, in the reader's register.
+ *
+ * All three dimensions run the same direction — higher means more of what was
+ * measured — so the health and security captions have to say "problems found"
+ * rather than name the section, or a reader supplies the opposite meaning from
+ * the word "health" and reads a good score as a bad one.
+ *
+ * Lives here rather than in the web report because the CLI prints the same
+ * number and needs the same disclaimer beside it. The direction of a scale is
+ * exactly the kind of thing two surfaces must not describe differently.
+ */
+export function scoreCaption(dimension: Dimension, persona: Persona): string {
+  if (dimension === "authorship") {
+    if (persona === "engineer") return "authorship";
+    if (persona === "acquirer") return "AI-generation likelihood";
+    return "how much looks AI-written";
+  }
+  if (dimension === "security") {
+    if (persona === "engineer") return "problems found — higher is worse";
+    if (persona === "acquirer") return "exposure";
+    return "problems found";
+  }
+  if (persona === "engineer") return "problems found — higher is worse";
+  if (persona === "acquirer") return "maintenance debt";
+  return "problems found";
+}
+
+/**
+ * How many of a dimension's checks produced a measurement.
+ *
+ * Phrased as evidence availability rather than as failure: "some checks could
+ * not run" reads like a malfunction, when the honest meaning is that this
+ * repository does not carry the evidence they need.
+ */
+export function coverageLine(measured: number, total: number): string {
+  const missing = total - measured;
+  if (missing <= 0) return `Based on all ${total} checks.`;
+  return (
+    `Based on ${measured} of ${total} checks — ${missing} needed evidence ` +
+    `this repository doesn't have.`
+  );
+}

@@ -1,4 +1,4 @@
-import type { ModuleGraph } from "@vibe/shared";
+import { toMermaid, type ModuleGraph } from "@vibe/shared";
 
 /**
  * The shape of the codebase, drawn from the imports the index already resolved.
@@ -77,6 +77,11 @@ export function ModuleMap({ graph }: { graph: ModuleGraph }) {
                 x2={to.x + NODE_WIDTH / 2}
                 y2={to.y}
                 className="module-edge"
+                // Lets a dash pattern be expressed in the line's own units
+                // rather than in pixels, so the landing page can draw a short
+                // edge and a long one at the same rate. Inert here: nothing in
+                // the report sets a dasharray.
+                pathLength={1}
                 // One hue, thickness varying by how many imports the edge
                 // stands for. A colour per edge would be a categorical
                 // encoding of a magnitude.
@@ -185,19 +190,4 @@ function layerNodes(graph: ModuleGraph): string[][] {
   }
 
   return layers.filter((l) => l.length > 0);
-}
-
-function toMermaid(graph: ModuleGraph): string {
-  const id = new Map<string, string>();
-  graph.nodes.forEach((node, i) => id.set(node.path, `n${i}`));
-
-  return [
-    "graph TD",
-    ...graph.nodes.map(
-      (n) => `  ${id.get(n.path)}["${n.path}<br/>${n.files} files"]`,
-    ),
-    ...graph.edges
-      .filter((e) => id.has(e.from) && id.has(e.to))
-      .map((e) => `  ${id.get(e.from)} --> ${id.get(e.to)}`),
-  ].join("\n");
 }

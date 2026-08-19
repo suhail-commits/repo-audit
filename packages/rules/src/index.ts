@@ -19,6 +19,8 @@ export {
 } from "./signal-labels";
 export { corpusComparison } from "./corpus";
 export {
+  coverageLine,
+  scoreCaption,
   dimensionLabel,
   hotspotTitle,
   hotspotCaveat,

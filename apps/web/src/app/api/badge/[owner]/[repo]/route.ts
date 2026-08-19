@@ -1,8 +1,7 @@
-import { authorshipBand } from "@vibe/shared";
+import { authorshipBand, parseRepoSlug } from "@vibe/shared";
 
 import { latestScanFor } from "@/db";
 import { renderBadge } from "@/lib/badge";
-import { parseRepoSlug } from "@/lib/slug";
 
 export const runtime = "nodejs";
 

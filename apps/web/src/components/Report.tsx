@@ -1,4 +1,10 @@
-import { TemplateNarrator, corpusComparison, dimensionLabel } from "@vibe/rules";
+import {
+  TemplateNarrator,
+  corpusComparison,
+  coverageLine,
+  dimensionLabel,
+  scoreCaption,
+} from "@vibe/rules";
 import type { NarratedFinding, NarratedScore } from "@vibe/rules";
 import {
   DIMENSIONS,
@@ -23,30 +29,6 @@ const PERSONA_LABELS: Record<Persona, string> = {
   acquirer: "Buyer",
 };
 
-/**
- * What each number is measuring, in the reader's register.
- *
- * Both scores run the same direction — higher is more of what was measured —
- * so the health caption has to say "problems found" rather than name the
- * section, or the reader supplies the opposite meaning from the word "health".
- */
-const SCORE_CAPTION: Record<Dimension, Record<Persona, string>> = {
-  authorship: {
-    founder: "how much looks AI-written",
-    engineer: "authorship",
-    acquirer: "AI-generation likelihood",
-  },
-  health: {
-    founder: "problems found",
-    engineer: "problems found — higher is worse",
-    acquirer: "maintenance debt",
-  },
-  security: {
-    founder: "problems found",
-    engineer: "problems found — higher is worse",
-    acquirer: "exposure",
-  },
-};
 
 export function Report({
   scanId,
@@ -241,7 +223,7 @@ function DimensionSection({
           <ScoreScale
             dimension={dimension}
             score={score.score}
-            caption={SCORE_CAPTION[dimension][persona]}
+            caption={scoreCaption(dimension, persona)}
           />
 
           {/*
@@ -389,15 +371,8 @@ function RepoFacts({ result }: { result: ScanResult }) {
 }
 
 function Coverage({ measured, total }: { measured: number; total: number }) {
-  const missing = total - measured;
-  return (
-    <p className="coverage">
-      Based on {measured} of {total} checks
-      {missing > 0
-        ? ` — ${missing} needed evidence this repository doesn't have.`
-        : "."}
-    </p>
-  );
+  // Wording lives in `@vibe/rules` so the CLI prints the same sentence.
+  return <p className="coverage">{coverageLine(measured, total)}</p>;
 }
 
 /**
