@@ -6,6 +6,7 @@ import { isTestFile } from "../ingest/guards";
 import { buildContext } from "../scan";
 import { createFixtureRepo, type FixtureRepo } from "../testing/fixture-repo";
 import { profileLanguages, tierFor } from "./language";
+import { probeStructuralParsers } from "./structural";
 
 let repo: FixtureRepo | undefined;
 afterEach(() => {
@@ -386,5 +387,39 @@ describe("Python structural analysis", () => {
     const ctx = await buildContext(repo.rootPath);
     expect(ctx.languages.dominantTier).toBe("history");
     expect(ctx.languages.unparsed).toContain("java");
+  });
+});
+
+describe("probeStructuralParsers", () => {
+  /*
+   * The guard against a build that silently lost its grammars.
+   *
+   * `StructuralIndex` only ever loads a grammar for a language the scanned
+   * repository actually contains, so a broken install looks perfectly healthy
+   * on a JavaScript repo and fails only on someone else's Python one. This
+   * probe asks all three regardless, which is what makes it usable as the
+   * assertion for a packaged build.
+   */
+  it("loads and parses every grammar the build ships", async () => {
+    const probes = await probeStructuralParsers();
+
+    expect(probes.map((p) => p.language).sort()).toEqual(["go", "python", "rust"]);
+
+    const failed = probes.filter((p) => !p.ok);
+    // Named in the message so a failure says which grammar and why, rather
+    // than "expected 0 to be 3".
+    expect(
+      failed.map((p) => `${p.language}: ${p.reason}`),
+      "every shipped grammar must load",
+    ).toEqual([]);
+  });
+
+  it("reports a real reason rather than swallowing the failure", async () => {
+    // Not a file-existence check: a grammar that loads but yields no named
+    // nodes is also a failure, which is how an ABI mismatch would present.
+    const probes = await probeStructuralParsers();
+    for (const probe of probes) {
+      if (!probe.ok) expect(probe.reason).toBeTruthy();
+    }
   });
 });
