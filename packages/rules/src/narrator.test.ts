@@ -1,4 +1,9 @@
-import { buildContext, analyzeAuthorship, analyzeHealth } from "@vibe/engine";
+import {
+  buildContext,
+  analyzeAuthorship,
+  analyzeHealth,
+  analyzeSecurity,
+} from "@vibe/engine";
 import { createFixtureRepo } from "@vibe/engine/testing";
 import {
   PERSONAS,
@@ -16,10 +21,15 @@ import { FALLBACK_TEMPLATE, templateFor, templatedRuleIds } from "./templates";
 
 const narrator = new TemplateNarrator();
 
-let cleanup: (() => void) | undefined;
+/*
+ * A list rather than one handle: the coverage tests below build several
+ * fixtures in a single test, because no single repository can make every rule
+ * fire — `missing-license` and `license-mismatch` are mutually exclusive by
+ * construction.
+ */
+const cleanups: (() => void)[] = [];
 afterEach(() => {
-  cleanup?.();
-  cleanup = undefined;
+  for (const done of cleanups.splice(0)) done();
 });
 
 const VIBE_FILES: Record<string, string> = {
@@ -53,10 +63,55 @@ function dupHelper(name: string, sep: string): string {
 `;
 }
 
-async function findingsFor(
+/**
+ * A repository that leaves as much exposed as one fixture can.
+ *
+ * Deliberately carries no licence file, which is what makes `missing-license`
+ * fire; the mismatch case needs a licence that contradicts the manifest and so
+ * lives in its own fixture below.
+ */
+const EXPOSED_FILES: Record<string, string> = {
+  "package.json": JSON.stringify({
+    name: "exposed",
+    dependencies: { next: "^15.0.0" },
+  }),
+  /*
+   * Correctly shaped and never real — the right length and character class for
+   * the vendor, because a pattern that only matches a short placeholder proves
+   * nothing about whether it would match the thing it exists to find.
+   *
+   * **The concatenation has to happen here, not in the fixture's text.** Written
+   * as `"AKIA" + "QRST…"` inside the template literal it reaches disk with the
+   * prefix split, the scanner matches nothing, and the coverage test passes
+   * having measured no secret at all.
+   */
+  "src/config.ts": `export const accessKeyId = "${"AKIA" + "QRSTUVWX2345YZ67"}";
+export const region = "us-east-1";
+`,
+  ".env": "DATABASE_URL=postgres://admin:s3cr3tpw@db.internal:5432/prod\n",
+  "src/run.ts": "export function go(input: string) {\n  return eval(input);\n}\n",
+  "app/api/users/route.ts": `export async function DELETE(request: Request) {
+  const id = new URL(request.url).searchParams.get("id");
+  await db.users.delete(id);
+  return Response.json({ ok: true });
+}
+`,
+};
+
+/** A licence file that contradicts the manifest — the one case above cannot hold. */
+const MISLICENSED_FILES: Record<string, string> = {
+  "package.json": JSON.stringify({ name: "mislicensed", license: "MIT" }),
+  LICENSE:
+    "                    GNU AFFERO GENERAL PUBLIC LICENSE\n" +
+    "                       Version 3, 19 November 2007\n\n" +
+    "  Copyright (C) 2007 Free Software Foundation, Inc.\n",
+  "src/index.ts": "export const x = 1;\n",
+};
+
+async function contextFor(
   files: Record<string, string>,
   withGit: boolean,
-): Promise<Finding[]> {
+): Promise<Awaited<ReturnType<typeof buildContext>>> {
   const repo = withGit
     ? createFixtureRepo({
         commits: [
@@ -67,22 +122,87 @@ async function findingsFor(
         ],
       })
     : createFixtureRepo({ files, withoutGit: true });
-  cleanup = repo.cleanup;
+  cleanups.push(repo.cleanup);
 
-  const ctx = await buildContext(repo.rootPath);
+  return buildContext(repo.rootPath);
+}
+
+async function findingsFor(
+  files: Record<string, string>,
+  withGit: boolean,
+): Promise<Finding[]> {
+  const ctx = await contextFor(files, withGit);
   return analyzeAuthorship(ctx).findings;
+}
+
+/**
+ * Every rule and every signal the three analyzers emit across the fixture set.
+ *
+ * Security is included because leaving it out is exactly how a gap hides: both
+ * coverage tests below used to run `analyzeAuthorship` alone while claiming to
+ * cover every dimension, so security's seven signals and five rules were
+ * guarded by nothing.
+ *
+ * `vulnerable-dependencies` is unavoidably absent — it is the only check that
+ * reaches the network, and a coverage test must not.
+ */
+async function emitted(): Promise<{ ruleIds: string[]; signalIds: string[] }> {
+  const ruleIds = new Set<string>();
+  const signalIds = new Set<string>();
+
+  for (const [files, withGit] of [
+    [VIBE_FILES, true],
+    [EXPOSED_FILES, false],
+    [MISLICENSED_FILES, false],
+  ] as const) {
+    const ctx = await contextFor(files, withGit);
+    const authorship = analyzeAuthorship(ctx);
+    const health = analyzeHealth(ctx, authorship.score.signals);
+    const security = await analyzeSecurity(ctx);
+
+    for (const f of [...authorship.findings, ...security.findings]) {
+      ruleIds.add(f.ruleId);
+    }
+    for (const s of [
+      ...authorship.score.signals,
+      ...health.score.signals,
+      ...security.score.signals,
+    ]) {
+      signalIds.add(s.id);
+    }
+  }
+
+  return { ruleIds: [...ruleIds], signalIds: [...signalIds] };
 }
 
 describe("template coverage", () => {
   it("has a hand-written template for every rule the engine emits", async () => {
-    const findings = await findingsFor(VIBE_FILES, true);
-    const emitted = [...new Set(findings.map((f) => f.ruleId))];
+    const { ruleIds } = await emitted();
 
-    expect(emitted.length).toBeGreaterThan(0);
+    /*
+     * Named explicitly rather than merely counted, because a coverage test that
+     * only asserts "some rules fired" passes while measuring nothing. The first
+     * draft of this fixture split the AWS prefix in the file it wrote to disk,
+     * so `hardcoded-secret` never fired and the test was green anyway.
+     *
+     * `vulnerable-dependency` is absent by design — it is the only check that
+     * reaches the network, and a coverage test must not.
+     */
+    for (const required of [
+      "hardcoded-secret",
+      "committed-env-file",
+      "unauthenticated-route",
+      "dangerous-call",
+      "missing-license",
+      "license-mismatch",
+    ]) {
+      expect(ruleIds, `${required} did not fire — the fixture stopped covering it`)
+        .toContain(required);
+    }
 
     // The fallback exists for vendored scanners that emit hundreds of rule IDs.
     // Rules we author ourselves should never quietly land on it.
-    const usingFallback = emitted.filter(
+    const usingFallback = ruleIds.filter(
       (ruleId) => templateFor(ruleId) === FALLBACK_TEMPLATE,
     );
     expect(
@@ -96,27 +216,16 @@ describe("template coverage", () => {
      * Same shape as the template-coverage test above, and for the same reason:
      * without it a new signal ships showing its raw id — "write-once-files" —
      * to someone reading a report about their own repository.
+     *
+     * Covers all three scored dimensions. Checking one of them would have
+     * passed while `test-coverage` — a health-only signal — rendered as
+     * "Test coverage" from the id-humanising fallback.
      */
-    const repo = createFixtureRepo({
-      commits: [{ message: "feat: build it", files: VIBE_FILES }],
-    });
-    cleanup = repo.cleanup;
-
-    const ctx = await buildContext(repo.rootPath);
-    const authorship = analyzeAuthorship(ctx);
-    /*
-     * Every dimension that carries a score, not just authorship. Checking one
-     * of them would have passed while `test-coverage` — a health-only signal —
-     * rendered as "Test coverage" from the id-humanising fallback.
-     */
-    const emitted = [
-      ...authorship.score.signals,
-      ...analyzeHealth(ctx, authorship.score.signals).score.signals,
-    ].map((s) => s.id);
-    expect(emitted.length).toBeGreaterThan(0);
+    const { signalIds } = await emitted();
+    expect(signalIds.length).toBeGreaterThan(0);
 
     const labelled = new Set(labelledSignalIds());
-    const missing = emitted.filter((id) => !labelled.has(id));
+    const missing = signalIds.filter((id) => !labelled.has(id));
     expect(
       missing,
       `these signals have no label: ${missing.join(", ")}`,

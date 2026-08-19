@@ -7,11 +7,12 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -b --pretty && pnpm --filter @vibe/web typecheck",
-    "scan": "tsx packages/engine/src/cli.ts",
-    "report": "tsx packages/rules/src/cli.ts",
+    "scan": "tsx packages/cli/src/index.ts --signals",
+    "report": "tsx packages/cli/src/index.ts",
     "web": "pnpm --filter @vibe/web dev",
     "seed": "pnpm --filter @vibe/web seed",
-    "sweep": "tsx scripts/false-positive-sweep.ts"
+    "sweep": "tsx scripts/false-positive-sweep.ts",
+    "audit": "tsx packages/cli/src/index.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
