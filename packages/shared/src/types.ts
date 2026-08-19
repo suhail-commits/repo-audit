@@ -253,7 +253,38 @@ export interface RepoInfo {
    * scans stored before this existed do not carry it.
    */
   headSha?: string;
+
+  /**
+   * When the source last moved, as the host reports it.
+   *
+   * Exists so a repeat scan can ask "has anything changed?" without paying for
+   * a whole analysis. It is deliberately *not* the head SHA: `pushed_at` comes
+   * back on the repository metadata call the scan already makes for the privacy
+   * and size gates, so comparing it costs nothing, while fetching a SHA costs
+   * its own request on every scan.
+   *
+   * It also fails in the safe direction. `pushed_at` moves on a push to any
+   * branch, not only the one analysed, so it can cause an unnecessary re-scan
+   * but can never serve a report for a revision that has been superseded.
+   *
+   * Optional: a zip upload has no host to ask, and rows predate it.
+   */
+  pushedAt?: string;
 }
+
+/**
+ * The shape `ScanResult` is written in today.
+ *
+ * **Written *and* read.** For a long time `schemaVersion` was stamped onto every
+ * result and never consulted anywhere, which made it decoration rather than a
+ * version: results are persisted as jsonb and read back by whatever code is
+ * deployed later, so the only thing standing between an old row and a crash was
+ * remembering to declare each new field optional by hand. That was not enough
+ * once — a row written before `focus` existed reached `dimensionLabel(undefined)`
+ * and took the page down. `readScanResult` in the web app is the one place that
+ * knows how to bring an older row up to this shape.
+ */
+export const CURRENT_SCHEMA_VERSION = 1;
 
 export interface ScanResult {
   schemaVersion: 1;

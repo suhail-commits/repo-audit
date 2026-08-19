@@ -124,6 +124,12 @@ export async function analyzeSecurity(
   return {
     score: scoreDimension("security", signals, {
       sourceFiles: ctx.files.sourceFiles().map((f) => f.relPath),
+      /*
+       * Matters most here of the three. A secret scan that read four fifths of
+       * the files and found nothing is not a repository with no secrets, and
+       * this is the dimension where that difference is expensive.
+       */
+      truncated: ctx.files.truncated,
     }),
     findings,
     warnings: licenseWarnings(),

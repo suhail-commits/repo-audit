@@ -14,10 +14,37 @@ export const LIMITS = {
   /** Hard cap on files considered; beyond this the scan reports truncation. */
   maxFiles: 25_000,
   /**
-   * Hard cap on source bytes read into memory across a scan. Generous for real
-   * source trees once node_modules and build output are excluded.
+   * Hard cap on source bytes read into memory across a scan.
+   *
+   * **This is the real memory ceiling of a scan, and it was set five times too
+   * high.** The old value of 150 MB was chosen as "generous for real source
+   * trees" without measuring what a scan actually costs, and source bytes are
+   * nowhere near the peak: `FileIndex` retains every file's content as a UTF-16
+   * string, `AstIndex` holds an oxc tree per JS/TS file, `StructuralIndex`
+   * holds a tree-sitter tree per Python/Go/Rust file, and all three stay live
+   * simultaneously because analyzers may read any of them at any point.
+   *
+   * Measured with `--expose-gc` across three real repositories:
+   *
+   * | repo | indexed source | peak RSS |
+   * |---|---|---|
+   * | `sindresorhus/p-limit` | 0.2 MB | 93 MB |
+   * | `colinhacks/zod` | 3 MB | 286 MB |
+   * | `facebook/react` | 36 MB | 583 MB |
+   *
+   * That is a fixed floor near 90 MB plus roughly 14 MB of resident memory per
+   * megabyte of source. The old cap therefore permitted a scan needing over
+   * 2 GB, on a platform where the function has about 1 GB — so the gate meant
+   * to produce an honest refusal instead produced an out-of-memory kill with no
+   * message at all.
+   *
+   * 40 MB lands near 640 MB peak, leaving room for the tarball and the Next
+   * runtime, and admits `facebook/react` whole. Beyond it the walk truncates,
+   * which is now both deterministic (see `walkRepo`) and reported: a truncated
+   * scan drops every dimension's confidence to `low` rather than presenting a
+   * partial read as a complete one.
    */
-  maxTotalBytes: 150_000_000,
+  maxTotalBytes: 40_000_000,
   /** Reject archives that expand beyond this (zip-bomb guard). */
   maxExtractedBytes: 500_000_000,
   /** Reject archives with more entries than this. */

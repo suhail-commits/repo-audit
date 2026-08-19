@@ -97,6 +97,7 @@ export function analyzeAuthorship(
     // match the set the signals judge, or a directory full of tests reads as
     // clean simply because nothing looked at it.
     sourceFiles: ctx.files.sourceFiles().map((f) => f.relPath),
+    truncated: ctx.files.truncated,
   });
 
   const findings: Finding[] = [

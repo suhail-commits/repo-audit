@@ -87,6 +87,7 @@ export function analyzeHealth(
       // so health gets the same ranking for free — under its own weights, which
       // is the point of re-weighting rather than reusing the score.
       sourceFiles: ctx.files.sourceFiles().map((f) => f.relPath),
+      truncated: ctx.files.truncated,
     }),
   };
 }

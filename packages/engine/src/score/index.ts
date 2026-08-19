@@ -18,6 +18,22 @@ export interface ScoreOptions {
    * computed exactly as before with no hotspots.
    */
   sourceFiles?: string[];
+  /**
+   * The repository was too large to read in full.
+   *
+   * **The largest missing input there is, and for a long time it did not reach
+   * the score at all.** `FileIndex.truncated` produced a warning string and
+   * nothing else, so a repository where a fifth of the files were read reported
+   * the same confidence as one read completely — every signal "available",
+   * coverage 100%, `high`.
+   *
+   * It caps confidence rather than scaling it, because the honest quantity is
+   * unknown: the walk stops when a cap is hit, so we never learn how many files
+   * were left. A ratio would be a fabricated denominator. What we can say
+   * truthfully is that we do not know how much we missed, and `low` is the
+   * word for that.
+   */
+  truncated?: boolean;
 }
 
 /**
@@ -71,9 +87,24 @@ export function scoreDimension(
   else if (coverage >= 0.5) confidence = "medium";
   else confidence = "low";
 
+  /*
+   * Signal coverage measures how many *checks* ran. It says nothing about how
+   * much of the repository they ran over, and on a truncated scan those are
+   * very different numbers — every signal reports available because each one
+   * genuinely ran, over a fraction of the files.
+   */
+  if (options.truncated) confidence = "low";
+
   const unavailable = signals
     .filter((s) => !s.available)
     .map((s) => s.unavailableReason ?? `${s.id} unavailable`);
+
+  if (options.truncated) {
+    unavailable.push(
+      "the repository was too large to read in full, so every check below ran " +
+        "over part of it",
+    );
+  }
 
   const hotspots = options.sourceFiles
     ? computeHotspots(signals, { sourceFiles: options.sourceFiles })
