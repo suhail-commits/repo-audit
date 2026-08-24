@@ -317,7 +317,19 @@ primitives and pure `ScanResult → string` renderers, and nothing else: any pro
 `packages/rules`, and any arithmetic in `packages/shared`, so the terminal and the web report
 cannot describe the same repository differently. It has **no npm dependencies of its own** —
 `util.parseArgs` and `util.styleText` are built in, and `styleText` already honours `NO_COLOR` and
-TTY detection.
+TTY detection. The prompts and spinner are hand-rolled on `node:readline` for the same reason.
+
+**Run with no arguments in a terminal and it asks.** The wizard is gated on `stdin` *and* `stdout`
+both being TTYs **and** no positional argument — a CLI that prompts with nothing attached hangs
+forever with no output, which is the worst failure a tool can have inside a pipeline. `pnpm scan .`
+passes a positional, so the commit gate can never enter it; a test pins that.
+
+**Branches are a GitHub-only concept here, deliberately.** `scanGitHubRepository` fetches the
+tarball and the commit history at one ref, so the tree and the history always match. A local scan
+reads whatever is checked out and *reports* it (`RepoInfo.branch`, from `.git/HEAD`) but never
+selects it: `git log` reads `HEAD` while `FileIndex` reads the working tree, so honouring a branch
+flag locally would score one branch's files against another's history, silently, with a `headSha`
+whose tree was never analysed.
 
 ### Engine pipeline
 
@@ -377,6 +389,8 @@ pnpm repo-audit <path|owner/repo|url>    # the narrated report
 pnpm repo-audit <path> --signals         # raw signal breakdown (the calibration view)
 pnpm repo-audit <path> --structural-only # ground-truth signals disabled, as calibration runs
 pnpm repo-audit <path> --persona=founder # a different reader
+pnpm repo-audit                          # no arguments: it asks
+pnpm repo-audit <path> --branch <name>   # a branch, tag or sha (GitHub only)
 pnpm repo-audit --selftest               # which parsers and grammars actually loaded
 pnpm scan / pnpm report                  # aliases, kept so the gate below is unchanged
 pnpm web                                 # Next.js dev server

@@ -142,6 +142,8 @@ pnpm install
 pnpm repo-audit .                        # the narrated report for a local checkout
 pnpm repo-audit owner/repo               # …or a public GitHub repository
 pnpm repo-audit . --signals              # every signal, its weight and its evidence
+pnpm repo-audit                          # no arguments: it asks which repo and branch
+pnpm repo-audit a/b --branch develop     # a specific branch (GitHub repositories only)
 pnpm repo-audit --help                   # everything else
 pnpm vitest run                          # the test suite
 pnpm web                                 # the app, on :3000
