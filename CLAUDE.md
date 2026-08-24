@@ -154,42 +154,55 @@ pnpm typecheck       # covers packages AND apps/web
 Additionally, **if a signal, index, or the scorer changed**:
 
 ```bash
-pnpm scan .          # authorship ~17, health ~4, security ~29-31; see below for which signals fire
+pnpm scan .          # authorship ~23, health ~4, security ~18; see below for which signals fire
 pnpm sweep           # median ~5, max under 30, nothing claiming `certain`
 ```
 
 `pnpm scan .` is the fastest real check that exists, but it is **no longer a "everything must read
-0.00" check** — four signals legitimately fire on this repository and knowing which is the point:
+0.00" check** — five signals legitimately fire on this repository and knowing which is the point:
 
 - `agent-tooling` **1.00** — `CLAUDE.md` is right there. Correct, and the reason the signal exists.
+- `build-velocity` **1.00** — 30,864 lines added across 3 active days, about 10,288 per author per
+  day. It reported *unavailable* for most of this project's life because `MIN_ACTIVE_DAYS` is 3 and
+  there were only 2; the third day of commits crossed the guard and it fired immediately at full
+  value. A true measurement, and the signal working exactly as designed — a rate needs a span
+  before it means anything.
 - `commit-size` **~0.74** — the median commit here really is around 465 lines. A true measurement.
 - `unauthenticated-routes` **1.00** — `POST /api/scans` really is open to anyone, by design. It is
   the only state-changing route in the repo, so the ratio is 1/1. A true measurement of a
   deliberate choice.
-- `missing-license` **1.00** — there is no `LICENSE` file in this repository and `package.json`
-  declares none. Also a true measurement. **Security lands around 29–31 here and that is the
-  baseline**, not a bug; it was 21 before the licence checks landed.
+- `vulnerable-dependencies` **~0.13** — one advisory in the installed tree. Drifts on its own; see
+  below.
+
+**Both licence signals now read 0**, and that is the change that moved security from ~31 to ~18.
+A `LICENSE` file exists, `package.json` declares `MIT`, and the two agree — so `missing-license`
+is 0 and `license-mismatch` went from *unavailable* to *available and 0*. Adding a signal to the
+denominator lowers every other signal's share, so the drop is larger than the 1.5 weight that
+stopped firing. The arithmetic is easy to check by hand: available weight is 18, and
+`unauthenticated-routes` alone contributes 16.7 of the 18.4 points.
 
 **Security is the one dimension whose baseline legitimately drifts on its own**, because
 `vulnerable-dependencies` is the only signal that reaches the network and OSV keeps publishing.
 Seen live: 29 one day and 31 the next across an identical 237-package tree, purely because
 `GHSA-2v37-7h3g-55p8` appeared for `nanoid`. **Before treating a security move on this repo as a
-regression, read the advisory list** — `pnpm scan .` prints every one. The arithmetic is easy to
-check by hand: available weight is 15.5, and `unauthenticated-routes` + `missing-license` alone
-contribute 4.5 of it.
+regression, read the advisory list** — `pnpm scan .` prints every one.
 
-`pnpm scan . --offline` reads **35 at medium confidence**, which is *higher*, and that is invariant
-2 rather than a contradiction of it: dropping `vulnerable-dependencies` redistributes its 2.5 across
-the remaining signals, two of which are saturated. A missing signal must never lower the score, and
-here it raises it. Use the online number as the baseline; reach for `--offline` to prove degradation
-works, not to get a stabler figure.
+`pnpm scan . --offline` reads **19**, one point *higher* than the online 18, and that is invariant
+2 rather than a contradiction of it: dropping `vulnerable-dependencies` redistributes its 2.5
+across the remaining signals, one of which is saturated. A missing signal must never lower the
+score, and here it raises it. Use the online number as the baseline; reach for `--offline` to prove
+degradation works, not to get a stabler figure.
 
-`build-velocity` reports **unavailable** here (one active day is a point, not a span), so does
-`license-mismatch`, which needs both a licence file and a declaration to compare, and so does
-`refactor-ratio` — twenty commits over two days is too short a history to have refactored anything.
-**That last one is load-bearing:** this repository's median commit deletes only 8.5% of what it
-changes, against 33–50% across the whole hand-written corpus, so without the maturity guard it
-would fire at nearly full value on our own code.
+`refactor-ratio` still reports **unavailable** here — under fifty commits is too short a history to
+have refactored anything. **That guard is load-bearing:** this repository's median commit deletes
+only 8.5% of what it changes, against 33–50% across the whole hand-written corpus, so without it
+the signal would fire at nearly full value on our own hand-written code.
+
+`build-velocity` and `license-mismatch` **used to** report unavailable here and no longer do — the
+first because a third active day of commits crossed `MIN_ACTIVE_DAYS`, the second because a
+`LICENSE` file now exists for it to compare against. Both are worth knowing about: an unavailable
+signal becoming available redistributes weight across the whole dimension, so scores move even
+though nothing about any existing signal changed.
 
 **Anything beyond those four firing is a false positive to investigate.**
 
@@ -357,11 +370,11 @@ complete `ScanResult`.
 pnpm vitest run                          # all tests
 pnpm typecheck                           # tsc -b
 pnpm sweep                               # false-positive sweep over known hand-written repos
-pnpm audit <path|owner/repo|url>         # the narrated report
-pnpm audit <path> --signals              # raw signal breakdown (the calibration view)
-pnpm audit <path> --structural-only      # ground-truth signals disabled, as calibration runs
-pnpm audit <path> --persona=founder      # a different reader
-pnpm audit --selftest                    # which parsers and grammars actually loaded
+pnpm repo-audit <path|owner/repo|url>    # the narrated report
+pnpm repo-audit <path> --signals         # raw signal breakdown (the calibration view)
+pnpm repo-audit <path> --structural-only # ground-truth signals disabled, as calibration runs
+pnpm repo-audit <path> --persona=founder # a different reader
+pnpm repo-audit --selftest               # which parsers and grammars actually loaded
 pnpm scan / pnpm report                  # aliases, kept so the gate below is unchanged
 pnpm web                                 # Next.js dev server
 ```
@@ -372,13 +385,12 @@ components and the CLI's renderers are source files with no test file of their o
 really did move. No signal changed: the sweep came back byte-identical (median 5, max 24, security
 clean across 20), which is the control for exactly this question.
 
-**`pnpm scan .` on this repo is the fastest sanity check.** Authorship lands around 17, health
-around 2 and security around 29–31 (it drifts with live OSV data — see *The gate*), with exactly
-four structural signals above zero — `agent-tooling`,
-`commit-size`, `unauthenticated-routes` and `missing-license` — and `build-velocity`,
-`license-mismatch` and `refactor-ratio` correctly reporting unavailable. See *The gate* for why each
-is a true measurement. A **fifth** signal firing on our own hand-written code is a false positive to
-investigate, not a result; that check has already caught two real bugs.
+**`pnpm scan .` on this repo is the fastest sanity check.** Authorship lands around 23, health
+around 4 and security around 18 (security drifts with live OSV data — see *The gate*), with five
+signals above zero: `agent-tooling`, `build-velocity`, `commit-size`, `unauthenticated-routes` and
+`vulnerable-dependencies`. `refactor-ratio` correctly reports unavailable. See *The gate* for why
+each is a true measurement. A **sixth** signal firing on our own hand-written code is a false
+positive to investigate, not a result; that check has already caught two real bugs.
 
 ---
 

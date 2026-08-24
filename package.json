@@ -1,6 +1,7 @@
 {
   "name": "vibe",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@11.0.8",
   "scripts": {
@@ -12,7 +13,7 @@
     "web": "pnpm --filter @vibe/web dev",
     "seed": "pnpm --filter @vibe/web seed",
     "sweep": "tsx scripts/false-positive-sweep.ts",
-    "audit": "tsx packages/cli/src/index.ts"
+    "repo-audit": "tsx packages/cli/src/index.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
