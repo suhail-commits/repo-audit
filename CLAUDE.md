@@ -154,12 +154,12 @@ pnpm typecheck       # covers packages AND apps/web
 Additionally, **if a signal, index, or the scorer changed**:
 
 ```bash
-pnpm scan .          # authorship ~23, health ~4, security ~18; see below for which signals fire
+pnpm scan .          # authorship ~23, health ~4, security ~29-31; see below for which signals fire
 pnpm sweep           # median ~5, max under 30, nothing claiming `certain`
 ```
 
 `pnpm scan .` is the fastest real check that exists, but it is **no longer a "everything must read
-0.00" check** — five signals legitimately fire on this repository and knowing which is the point:
+0.00" check** — six signals legitimately fire on this repository and knowing which is the point:
 
 - `agent-tooling` **1.00** — `CLAUDE.md` is right there. Correct, and the reason the signal exists.
 - `build-velocity` **1.00** — 30,864 lines added across 3 active days, about 10,288 per author per
@@ -167,19 +167,20 @@ pnpm sweep           # median ~5, max under 30, nothing claiming `certain`
   there were only 2; the third day of commits crossed the guard and it fired immediately at full
   value. A true measurement, and the signal working exactly as designed — a rate needs a span
   before it means anything.
-- `commit-size` **~0.74** — the median commit here really is around 465 lines. A true measurement.
+- `commit-size` **~0.72** — the median commit here really is around 465 lines. A true measurement.
 - `unauthenticated-routes` **1.00** — `POST /api/scans` really is open to anyone, by design. It is
   the only state-changing route in the repo, so the ratio is 1/1. A true measurement of a
   deliberate choice.
+- `missing-license` **1.00** — there is no `LICENSE` file in this repository and `package.json`
+  declares none, so by default the code is all rights reserved. A true measurement of a state that
+  has not been decided yet, and it is deliberately not "fixed" by generating one: a licence is a
+  legal declaration about someone's own work, so it comes from the owner or it does not exist.
 - `vulnerable-dependencies` **~0.13** — one advisory in the installed tree. Drifts on its own; see
   below.
 
-**Both licence signals now read 0**, and that is the change that moved security from ~31 to ~18.
-A `LICENSE` file exists, `package.json` declares `MIT`, and the two agree — so `missing-license`
-is 0 and `license-mismatch` went from *unavailable* to *available and 0*. Adding a signal to the
-denominator lowers every other signal's share, so the drop is larger than the 1.5 weight that
-stopped firing. The arithmetic is easy to check by hand: available weight is 18, and
-`unauthenticated-routes` alone contributes 16.7 of the 18.4 points.
+**Security lands around 29–31 here and that is the baseline**, not a bug; it was 21 before the
+licence checks landed. The arithmetic is easy to check by hand: available weight is 15.5, and
+`unauthenticated-routes` + `missing-license` alone contribute 4.5 of it.
 
 **Security is the one dimension whose baseline legitimately drifts on its own**, because
 `vulnerable-dependencies` is the only signal that reaches the network and OSV keeps publishing.
@@ -187,9 +188,9 @@ Seen live: 29 one day and 31 the next across an identical 237-package tree, pure
 `GHSA-2v37-7h3g-55p8` appeared for `nanoid`. **Before treating a security move on this repo as a
 regression, read the advisory list** — `pnpm scan .` prints every one.
 
-`pnpm scan . --offline` reads **19**, one point *higher* than the online 18, and that is invariant
-2 rather than a contradiction of it: dropping `vulnerable-dependencies` redistributes its 2.5
-across the remaining signals, one of which is saturated. A missing signal must never lower the
+`pnpm scan . --offline` reads **35 at medium confidence**, which is *higher*, and that is invariant
+2 rather than a contradiction of it: dropping `vulnerable-dependencies` redistributes its 2.5 across
+the remaining signals, two of which are saturated. A missing signal must never lower the
 score, and here it raises it. Use the online number as the baseline; reach for `--offline` to prove
 degradation works, not to get a stabler figure.
 
@@ -198,11 +199,13 @@ have refactored anything. **That guard is load-bearing:** this repository's medi
 only 8.5% of what it changes, against 33–50% across the whole hand-written corpus, so without it
 the signal would fire at nearly full value on our own hand-written code.
 
-`build-velocity` and `license-mismatch` **used to** report unavailable here and no longer do — the
-first because a third active day of commits crossed `MIN_ACTIVE_DAYS`, the second because a
-`LICENSE` file now exists for it to compare against. Both are worth knowing about: an unavailable
-signal becoming available redistributes weight across the whole dimension, so scores move even
-though nothing about any existing signal changed.
+`license-mismatch` also reports **unavailable** — it needs both a licence file and a declaration to
+compare, and there is neither.
+
+`build-velocity` **used to** report unavailable here and no longer does: a third active day of
+commits crossed `MIN_ACTIVE_DAYS`, and it fired immediately at full value. Worth knowing about as a
+class — an unavailable signal becoming available redistributes weight across the whole dimension,
+so every other score moves even though nothing about any existing signal changed.
 
 **Anything beyond those four firing is a false positive to investigate.**
 
@@ -386,11 +389,12 @@ really did move. No signal changed: the sweep came back byte-identical (median 5
 clean across 20), which is the control for exactly this question.
 
 **`pnpm scan .` on this repo is the fastest sanity check.** Authorship lands around 23, health
-around 4 and security around 18 (security drifts with live OSV data — see *The gate*), with five
-signals above zero: `agent-tooling`, `build-velocity`, `commit-size`, `unauthenticated-routes` and
-`vulnerable-dependencies`. `refactor-ratio` correctly reports unavailable. See *The gate* for why
-each is a true measurement. A **sixth** signal firing on our own hand-written code is a false
-positive to investigate, not a result; that check has already caught two real bugs.
+around 4 and security around 29–31 (security drifts with live OSV data — see *The gate*), with six
+signals above zero: `agent-tooling`, `build-velocity`, `commit-size`, `unauthenticated-routes`,
+`missing-license` and `vulnerable-dependencies`. `refactor-ratio` and `license-mismatch` correctly
+report unavailable. See *The gate* for why each is a true measurement. A **seventh** signal firing
+on our own hand-written code is a false positive to investigate, not a result; that check has
+already caught two real bugs.
 
 ---
 
