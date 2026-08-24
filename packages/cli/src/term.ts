@@ -16,9 +16,25 @@ import { styleText } from "node:util";
 
 let enabled = true;
 
+/**
+ * Which stream colour decisions are made against.
+ *
+ * This used to be hardcoded to `process.stdout`, which was wrong the moment
+ * anything was written to stderr: `repo-audit . > report.txt` redirects stdout
+ * to a file, so `styleText` correctly decided "not a terminal" and stripped the
+ * colour — including from the progress lines, which were going to stderr, which
+ * *was* still a terminal. Colour vanished from the one place it was wanted.
+ */
+let paintStream: { isTTY?: boolean } = process.stdout;
+
 /** Called once from argument parsing. */
 export function setColor(on: boolean): void {
   enabled = on;
+}
+
+/** Point colour decisions at the stream actually being written to. */
+export function setColorStream(stream: { isTTY?: boolean }): void {
+  paintStream = stream;
 }
 
 type Style = Parameters<typeof styleText>[0];
@@ -27,7 +43,10 @@ function paint(style: Style, text: string): string {
   if (!enabled) return text;
   // `styleText` still returns plain text when the stream is not a TTY or
   // NO_COLOR is set, so this is a narrowing of its decision, never a widening.
-  return styleText(style, text, { stream: process.stdout });
+  return styleText(style, text, {
+    stream: paintStream as Parameters<typeof styleText>[2] extends
+      { stream?: infer S } ? S : never,
+  });
 }
 
 export const dim = (t: string) => paint("dim", t);

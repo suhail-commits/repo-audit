@@ -16,9 +16,12 @@ import {
   type ScanResult,
 } from "@vibe/shared";
 
+import { isInteractive, realIo, type Io } from "./io";
 import { renderReport } from "./render/report";
 import { renderSignals } from "./render/signals";
-import { accent, bold, dim, setColor } from "./term";
+import { createSpinner } from "./spinner";
+import { accent, bold, dim, setColor, setColorStream } from "./term";
+import { runWizard } from "./wizard";
 
 /** Kept in step with the published manifest by the build, never read at runtime. */
 export const VERSION = "0.1.0";
@@ -34,6 +37,8 @@ ${bold("EXAMPLES")}
   repo-audit ../some-project            scan a local directory
   repo-audit sindresorhus/ky            scan a public GitHub repository
   repo-audit https://github.com/a/b     the same, pasted from the address bar
+  repo-audit                            no arguments: it asks
+  repo-audit a/b --branch develop       a specific branch
   repo-audit . --json > report.json     machine-readable output
 
 ${bold("OPTIONS")}
@@ -43,6 +48,7 @@ ${bold("OPTIONS")}
   --mermaid            the module graph as Mermaid, for a README
   --offline            skip the dependency advisory lookup (the only network call)
   --structural-only    ignore commit trailers and agent config, as calibration does
+  --branch <name>      branch, tag or sha to read (GitHub repositories only)
   --token <token>      GitHub token; defaults to $GITHUB_TOKEN
   --no-color           plain text (also honours NO_COLOR)
   --selftest           report which parsers and grammars actually loaded
@@ -50,6 +56,12 @@ ${bold("OPTIONS")}
   --help               this
 
 ${bold("NOTES")}
+  Run it with no arguments in a terminal and it walks you through it.
+
+  --branch applies to GitHub repositories only. For a local folder the scan
+  reads whatever is checked out, because the files on disk and the commit
+  history have to come from the same place.
+
   A local checkout is read at full strength. Scanning through GitHub gives
   per-commit totals but no per-file changes, so several history signals report
   themselves unavailable and confidence drops — the report says which.
@@ -74,7 +86,7 @@ export interface CliResult {
  * build: its own top risk is a false positive on someone's code, and a wrong
  * answer that blocks work costs far more than one that is merely read.
  */
-export async function run(argv: string[]): Promise<CliResult> {
+export async function run(argv: string[], io: Io = realIo()): Promise<CliResult> {
   let parsed;
   try {
     parsed = parseArgs({
@@ -92,6 +104,7 @@ export async function run(argv: string[]): Promise<CliResult> {
         offline: { type: "boolean", default: false },
         "structural-only": { type: "boolean", default: false },
         token: { type: "string" },
+        branch: { type: "string" },
         color: { type: "boolean", default: true },
         selftest: { type: "boolean", default: false },
         version: { type: "boolean", default: false },
@@ -108,6 +121,10 @@ export async function run(argv: string[]): Promise<CliResult> {
 
   const { values, positionals } = parsed;
   setColor(values.color !== false);
+  // Colour decisions follow the stream being written to. Hardcoding stdout
+  // stripped the colour from progress lines whenever stdout was redirected and
+  // stderr was still a terminal — the one case where they were wanted most.
+  setColorStream(io.stdout);
 
   if (values.help) return { stdout: USAGE, stderr: "", exitCode: 0 };
   if (values.version) return { stdout: `${VERSION}\n`, stderr: "", exitCode: 0 };
@@ -118,7 +135,28 @@ export async function run(argv: string[]): Promise<CliResult> {
     return { stdout: "", stderr: `${persona.message}\n`, exitCode: 2 };
   }
 
-  const target = positionals[0];
+  const token = values.token ?? process.env["GITHUB_TOKEN"];
+
+  /*
+   * The wizard, and the two conditions that gate it.
+   *
+   * No positional, because someone who named a repository has already answered
+   * the only required question. And a terminal on both ends, because prompting
+   * into a pipe hangs forever with no output — the worst failure a CLI can have
+   * in a script. `pnpm scan .` passes a positional, so the commit gate can
+   * never enter this path.
+   */
+  let target = positionals[0];
+  let wizardRef: string | undefined;
+
+  if (!target && isInteractive(io)) {
+    const answers = await runWizard(io, token);
+    // Cancelled at a prompt. Nothing was scanned and nothing went wrong.
+    if (!answers) return { stdout: "", stderr: "", exitCode: 0 };
+    target = answers.target;
+    wizardRef = answers.ref;
+  }
+
   if (!target) {
     return {
       stdout: "",
@@ -139,11 +177,8 @@ export async function run(argv: string[]): Promise<CliResult> {
    * produce a clean file, and a stage line written to stdout would corrupt it.
    */
   const quiet = values.json || values.mermaid;
-  const onProgress = (stage: ScanStage) => {
-    if (!quiet && process.stderr.isTTY) {
-      process.stderr.write(`${dim("  · " + stage.label)}\n`);
-    }
-  };
+  const spinner = createSpinner(io, !quiet);
+  const ref = values.branch ?? wizardRef;
 
   let result: ScanResult;
   try {
@@ -151,10 +186,14 @@ export async function run(argv: string[]): Promise<CliResult> {
       persona,
       offline: values.offline === true,
       structuralOnly: values["structural-only"] === true,
-      ...(values.token ? { token: values.token } : {}),
-      onProgress,
+      ...(token ? { token } : {}),
+      ...(ref ? { ref } : {}),
+      onProgress: spinner.onProgress,
     });
+    spinner.succeed("scanned");
   } catch (err) {
+    // Stop first, or the message lands on top of a half-drawn spinner frame.
+    spinner.stop();
     return {
       stdout: "",
       stderr: `${formatScanError(err)}\n`,
