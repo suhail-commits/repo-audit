@@ -252,6 +252,15 @@ export interface RepoInfo {
    * Optional because a zip upload has no commits to take it from, and because
    * scans stored before this existed do not carry it.
    */
+  /**
+   * The branch the report was produced from.
+   *
+   * Stated for the same reason `headSha` is: without it, two scans of one
+   * project can legitimately disagree and the reader has no way to account for
+   * it. On a local checkout this is whatever is checked out, because the files
+   * on disk and the history must come from the same place.
+   */
+  branch?: string;
   headSha?: string;
 
   /**

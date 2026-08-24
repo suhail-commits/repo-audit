@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -265,4 +265,31 @@ export function parseGitLog(raw: string): Commit[] {
   }
 
   return commits;
+}
+
+/**
+ * The branch currently checked out, read straight from `.git/HEAD`.
+ *
+ * A file read rather than `git rev-parse --abbrev-ref HEAD`, for two reasons:
+ * it costs no subprocess on a path that already shells out once, and it works
+ * with no `git` binary at all — which the deployed product does not have.
+ *
+ * Returns null on a detached HEAD, where the file holds a raw sha rather than a
+ * ref. That is honest: there is no branch to name, and inventing one would put
+ * a wrong branch beside a correct revision in the report.
+ *
+ * **Deliberately not used to *choose* a branch, only to report one.** The files
+ * on disk are whatever is checked out, and `git log` reads `HEAD` — so naming
+ * anything else here would let the report describe a tree it never analysed.
+ */
+export function checkedOutBranch(rootPath: string): string | null {
+  try {
+    const head = readFileSync(path.join(rootPath, ".git", "HEAD"), "utf8").trim();
+    const match = /^ref:\s+refs\/heads\/(.+)$/.exec(head);
+    return match?.[1] ?? null;
+  } catch {
+    // No .git, no permission, or a worktree pointer we do not follow. The
+    // caller renders the branch as unknown rather than failing a scan over it.
+    return null;
+  }
 }

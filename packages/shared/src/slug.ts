@@ -36,3 +36,24 @@ export function parseRepoSlug(input: string): string | null {
   if (!SLUG_RE.test(slug) || slug.includes("..")) return null;
   return slug;
 }
+
+/**
+ * The branch a pasted GitHub URL already names, if it names one.
+ *
+ * `parseRepoSlug` deliberately drops everything past the repo segment so the
+ * slug is clean — but `github.com/owner/repo/tree/develop` is the single most
+ * likely thing anyone pastes, and until this existed that URL silently scanned
+ * `main`. The branch was in the string the whole time.
+ *
+ * Handles branch names containing slashes, which `tree/` URLs render verbatim:
+ * `/tree/feature/thing` is the branch `feature/thing`, not `feature`.
+ *
+ * Returns null for a URL with no `/tree/` segment, and for `/tree/` with
+ * nothing after it.
+ */
+export function parseRepoBranch(input: string): string | null {
+  const value = input.trim().split(/[?#]/)[0] ?? "";
+  const match = /\/tree\/(.+)$/.exec(value);
+  const branch = match?.[1]?.replace(/\/+$/, "");
+  return branch ? branch : null;
+}
