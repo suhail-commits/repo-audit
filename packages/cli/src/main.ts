@@ -314,11 +314,24 @@ async function selftest(): Promise<CliResult> {
   }
 
   /*
-   * Still exit 0. A degraded install is worth reporting and is not a crash,
-   * and the scan output already names the affected languages in its warnings
-   * for the languages a given repository actually contains.
+   * Non-zero when a grammar failed, and the reasoning here changed.
+   *
+   * This used to always exit 0, on the grounds that a degraded install is not a
+   * crash — which is true of a *scan*, where the warnings name the affected
+   * languages. But `--selftest` exists precisely to be run by something
+   * checking whether an install is sound, and a check that reports failure
+   * while exiting 0 cannot be used by a script.
+   *
+   * It also made the test guarding this flag incapable of failing: it asserted
+   * the exit code and that "python", "go" and "rust" appeared in the output —
+   * and those words appear in the FAILED lines too. A completely broken
+   * install passed.
    */
-  return { stdout: lines.join("\n") + "\n", stderr: "", exitCode: 0 };
+  return {
+    stdout: lines.join("\n") + "\n",
+    stderr: "",
+    exitCode: failed.length > 0 ? 1 : 0,
+  };
 }
 
 /** GitHub's errors carry a status worth surfacing; everything else is a message. */
