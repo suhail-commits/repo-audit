@@ -32,6 +32,15 @@ export interface GitHubOptions {
    */
   token?: string;
   signal?: AbortSignal;
+  /**
+   * Branch, tag or commit sha to read. Omit for the repository's default branch.
+   *
+   * **Source and history must be fetched at the same ref or the report is a
+   * fabrication** — one branch's files scored against another branch's commits,
+   * with a revision hash whose tree was never analysed. So this is threaded
+   * through `fetchTarball` and `fetchCommits` together, never one of them.
+   */
+  ref?: string;
 }
 
 export interface RepoMeta {
@@ -138,6 +147,60 @@ export async function fetchRepoMeta(
   };
 }
 
+export interface BranchList {
+  names: string[];
+  /** The repository's default, always present in `names` when it exists. */
+  defaultBranch: string;
+  /** True when the repository has more branches than one page holds. */
+  truncated: boolean;
+}
+
+/**
+ * List a repository's branches, for a caller that wants to offer a choice.
+ *
+ * **One request, and it is not part of a scan.** A scan costs three requests
+ * plus one per hundred commits, against sixty an hour unauthenticated, so this
+ * is deliberately separate: it is paid only when something actually asks for a
+ * branch list, never as a side effect of scanning.
+ *
+ * Truncation is reported rather than hidden. A repository with more than a
+ * hundred branches would otherwise present a silently partial list, and the one
+ * the user wanted being absent looks identical to it not existing.
+ */
+export async function fetchBranches(
+  slug: string,
+  defaultBranch: string,
+  opts: GitHubOptions = {},
+): Promise<BranchList> {
+  if (!isValidSlug(slug)) {
+    throw new GitHubError(`Invalid repository slug: ${slug}`, 400);
+  }
+
+  const perPage = 100;
+  const response = await request(
+    `${API}/repos/${slug}/branches?per_page=${perPage}`,
+    opts,
+  );
+  const body = (await response.json()) as { name?: string }[];
+  const names = body.map((b) => b.name).filter((n): n is string => Boolean(n));
+
+  /*
+   * The default first, then the rest in the order GitHub gave them. A caller
+   * rendering a picker wants the safe answer at the top, and GitHub returns
+   * branches alphabetically rather than by importance.
+   */
+  const ordered = [
+    ...(names.includes(defaultBranch) ? [defaultBranch] : []),
+    ...names.filter((n) => n !== defaultBranch),
+  ];
+
+  return {
+    names: ordered,
+    defaultBranch,
+    truncated: body.length >= perPage,
+  };
+}
+
 export interface TarballResult {
   rootPath: string;
   entriesExtracted: number;
@@ -165,8 +228,17 @@ export async function fetchTarball(
     throw new GitHubError(`Invalid repository slug: ${slug}`, 400);
   }
 
+  /*
+   * `/tarball` with no ref serves the default branch, which is why this worked
+   * before any of the branch plumbing existed. The ref is encoded because a
+   * branch name may legitimately contain a slash — `feature/thing` is the most
+   * common naming convention there is, and pasting it raw would build a URL
+   * pointing at a repository path that does not exist.
+   */
   const response = await request(
-    `${API}/repos/${slug}/tarball`,
+    opts.ref
+      ? `${API}/repos/${slug}/tarball/${encodeURIComponent(opts.ref)}`
+      : `${API}/repos/${slug}/tarball`,
     opts,
     "application/vnd.github+json",
   );
@@ -342,16 +414,34 @@ interface GraphqlCommitNode {
   author: { name?: string | null; email?: string | null } | null;
 }
 
+interface GraphqlRefTarget {
+  target?: {
+    history?: {
+      pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
+      nodes?: GraphqlCommitNode[];
+    };
+  };
+}
+
 async function fetchCommitsGraphql(
   slug: string,
   maxCommits: number,
   opts: CommitFetchOptions,
 ): Promise<CommitHistory> {
   const [owner, name] = slug.split("/") as [string, string];
+
+  /*
+   * `ref(qualifiedName:)` when a branch was asked for, `defaultBranchRef`
+   * otherwise. Both land `history` at the same depth, which is what lets the
+   * response be read through one expression below rather than two.
+   */
+  const selector = opts.ref
+    ? `ref(qualifiedName:$ref)`
+    : `defaultBranchRef`;
   const query = `
-    query($owner:String!, $name:String!, $count:Int!, $after:String) {
+    query($owner:String!, $name:String!, $count:Int!, $after:String${opts.ref ? ", $ref:String!" : ""}) {
       repository(owner:$owner, name:$name) {
-        defaultBranchRef {
+        ${selector} {
           target {
             ... on Commit {
               history(first:$count, after:$after) {
@@ -382,6 +472,7 @@ async function fetchCommitsGraphql(
           name,
           count: Math.min(100, maxCommits - nodes.length),
           after,
+          ...(opts.ref ? { ref: opts.ref } : {}),
         },
       }),
       ...(opts.signal ? { signal: opts.signal } : {}),
@@ -396,21 +487,19 @@ async function fetchCommitsGraphql(
     const body = (await response.json()) as {
       data?: {
         repository?: {
-          defaultBranchRef?: {
-            target?: {
-              history?: {
-                pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
-                nodes?: GraphqlCommitNode[];
-              };
-            };
-          };
+          defaultBranchRef?: GraphqlRefTarget;
+          ref?: GraphqlRefTarget;
         };
       };
       errors?: unknown[];
     };
 
-    const historyPage =
-      body.data?.repository?.defaultBranchRef?.target?.history;
+    // Whichever selector the query used; a named ref that does not exist comes
+    // back as null, which falls through to the REST path and then to a 404.
+    const selected = opts.ref
+      ? body.data?.repository?.ref
+      : body.data?.repository?.defaultBranchRef;
+    const historyPage = selected?.target?.history;
     if (body.errors?.length || !historyPage?.nodes) {
       return fetchCommitsRest(slug, maxCommits, opts);
     }
@@ -454,7 +543,10 @@ async function fetchCommitsRest(
 
   for (let page = 1; listed.length < maxCommits; page++) {
     const response = await request(
-      `${API}/repos/${slug}/commits?per_page=${perPage}&page=${page}`,
+      // `sha` accepts a branch name, tag or commit sha; omitted it means the
+      // default branch, which is the behaviour every caller had before refs.
+      `${API}/repos/${slug}/commits?per_page=${perPage}&page=${page}` +
+        (opts.ref ? `&sha=${encodeURIComponent(opts.ref)}` : ""),
       opts,
     );
     const batch = (await response.json()) as CommitListEntry[];

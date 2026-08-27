@@ -154,42 +154,58 @@ pnpm typecheck       # covers packages AND apps/web
 Additionally, **if a signal, index, or the scorer changed**:
 
 ```bash
-pnpm scan .          # authorship ~17, health ~4, security ~29-31; see below for which signals fire
+pnpm scan .          # authorship ~23, health ~4, security ~29-31; see below for which signals fire
 pnpm sweep           # median ~5, max under 30, nothing claiming `certain`
 ```
 
 `pnpm scan .` is the fastest real check that exists, but it is **no longer a "everything must read
-0.00" check** — four signals legitimately fire on this repository and knowing which is the point:
+0.00" check** — six signals legitimately fire on this repository and knowing which is the point:
 
 - `agent-tooling` **1.00** — `CLAUDE.md` is right there. Correct, and the reason the signal exists.
-- `commit-size` **~0.74** — the median commit here really is around 465 lines. A true measurement.
+- `build-velocity` **1.00** — 30,864 lines added across 3 active days, about 10,288 per author per
+  day. It reported *unavailable* for most of this project's life because `MIN_ACTIVE_DAYS` is 3 and
+  there were only 2; the third day of commits crossed the guard and it fired immediately at full
+  value. A true measurement, and the signal working exactly as designed — a rate needs a span
+  before it means anything.
+- `commit-size` **~0.72** — the median commit here really is around 465 lines. A true measurement.
 - `unauthenticated-routes` **1.00** — `POST /api/scans` really is open to anyone, by design. It is
   the only state-changing route in the repo, so the ratio is 1/1. A true measurement of a
   deliberate choice.
 - `missing-license` **1.00** — there is no `LICENSE` file in this repository and `package.json`
-  declares none. Also a true measurement. **Security lands around 29–31 here and that is the
-  baseline**, not a bug; it was 21 before the licence checks landed.
+  declares none, so by default the code is all rights reserved. A true measurement of a state that
+  has not been decided yet, and it is deliberately not "fixed" by generating one: a licence is a
+  legal declaration about someone's own work, so it comes from the owner or it does not exist.
+- `vulnerable-dependencies` **~0.13** — one advisory in the installed tree. Drifts on its own; see
+  below.
+
+**Security lands around 29–31 here and that is the baseline**, not a bug; it was 21 before the
+licence checks landed. The arithmetic is easy to check by hand: available weight is 15.5, and
+`unauthenticated-routes` + `missing-license` alone contribute 4.5 of it.
 
 **Security is the one dimension whose baseline legitimately drifts on its own**, because
 `vulnerable-dependencies` is the only signal that reaches the network and OSV keeps publishing.
 Seen live: 29 one day and 31 the next across an identical 237-package tree, purely because
 `GHSA-2v37-7h3g-55p8` appeared for `nanoid`. **Before treating a security move on this repo as a
-regression, read the advisory list** — `pnpm scan .` prints every one. The arithmetic is easy to
-check by hand: available weight is 15.5, and `unauthenticated-routes` + `missing-license` alone
-contribute 4.5 of it.
+regression, read the advisory list** — `pnpm scan .` prints every one.
 
 `pnpm scan . --offline` reads **35 at medium confidence**, which is *higher*, and that is invariant
 2 rather than a contradiction of it: dropping `vulnerable-dependencies` redistributes its 2.5 across
-the remaining signals, two of which are saturated. A missing signal must never lower the score, and
-here it raises it. Use the online number as the baseline; reach for `--offline` to prove degradation
-works, not to get a stabler figure.
+the remaining signals, two of which are saturated. A missing signal must never lower the
+score, and here it raises it. Use the online number as the baseline; reach for `--offline` to prove
+degradation works, not to get a stabler figure.
 
-`build-velocity` reports **unavailable** here (one active day is a point, not a span), so does
-`license-mismatch`, which needs both a licence file and a declaration to compare, and so does
-`refactor-ratio` — twenty commits over two days is too short a history to have refactored anything.
-**That last one is load-bearing:** this repository's median commit deletes only 8.5% of what it
-changes, against 33–50% across the whole hand-written corpus, so without the maturity guard it
-would fire at nearly full value on our own code.
+`refactor-ratio` still reports **unavailable** here — under fifty commits is too short a history to
+have refactored anything. **That guard is load-bearing:** this repository's median commit deletes
+only 8.5% of what it changes, against 33–50% across the whole hand-written corpus, so without it
+the signal would fire at nearly full value on our own hand-written code.
+
+`license-mismatch` also reports **unavailable** — it needs both a licence file and a declaration to
+compare, and there is neither.
+
+`build-velocity` **used to** report unavailable here and no longer does: a third active day of
+commits crossed `MIN_ACTIVE_DAYS`, and it fired immediately at full value. Worth knowing about as a
+class — an unavailable signal becoming available redistributes weight across the whole dimension,
+so every other score moves even though nothing about any existing signal changed.
 
 **Anything beyond those four firing is a false positive to investigate.**
 
@@ -247,6 +263,32 @@ the distribution the report compares against goes stale even though nothing abou
 4. Confirm it survives the deploy target: no `git` binary, no writable filesystem outside `/tmp`,
    a hard function duration cap.
 
+### Playbook — publishing the CLI
+
+The package is **`how-much-ai`** on npm; the binary it installs is `repo-audit`. `repo-audit` was
+already taken by a codebase-health tool, which is the worst kind of collision.
+
+1. `pnpm build` — one esbuild call into `packages/cli/dist`, a generated staging directory, so every
+   `packages/*` stays `private: true` and what ships is exactly what the build wrote.
+2. **The output must be ESM.** CJS rewrites `import.meta.url`, and `structural.ts` builds its
+   grammar resolver from `createRequire(import.meta.url)` — a CJS bundle kills every structural
+   language at load, silently.
+3. **Five dependencies stay external**: `oxc-parser`, `oxc-resolver`, `web-tree-sitter`,
+   `tree-sitter-wasms`, `tar-stream`. The list is *derived* from `packages/engine/package.json` and
+   becomes both esbuild's `external` and the published `dependencies`, so they cannot drift.
+4. `pnpm verify:package` — packs, installs into a temp directory **outside the repo**, scans a
+   Python/Go/Rust fixture, then **breaks the install and requires the same checks to fail**. Both
+   halves are mandatory. Read the entries in *Bugs worth remembering*: the verification passed
+   against a package with no grammars in it at all until `NODE_PATH` was stripped from the child
+   environment.
+5. Assert only on things a broken package cannot fake — `duplicate-functions` over non-JS/TS files,
+   `routes`, a `moduleGraph` with edges. **Never `analysisTier`**, which is computed from file
+   extensions and reads "structural" on a completely dead engine.
+6. `npm publish` from `packages/cli/dist` stays a human action. It is irreversible after 72 hours.
+
+**Only Windows is verified.** oxc ships a different native binary per platform and there is no CI;
+the README says so rather than implying coverage that does not exist.
+
 ### Playbook — upgrading `oxc-parser`
 
 Pre-1.0, ships a minor roughly weekly, and has already renamed AST nodes once — silently returning
@@ -301,7 +343,19 @@ primitives and pure `ScanResult → string` renderers, and nothing else: any pro
 `packages/rules`, and any arithmetic in `packages/shared`, so the terminal and the web report
 cannot describe the same repository differently. It has **no npm dependencies of its own** —
 `util.parseArgs` and `util.styleText` are built in, and `styleText` already honours `NO_COLOR` and
-TTY detection.
+TTY detection. The prompts and spinner are hand-rolled on `node:readline` for the same reason.
+
+**Run with no arguments in a terminal and it asks.** The wizard is gated on `stdin` *and* `stdout`
+both being TTYs **and** no positional argument — a CLI that prompts with nothing attached hangs
+forever with no output, which is the worst failure a tool can have inside a pipeline. `pnpm scan .`
+passes a positional, so the commit gate can never enter it; a test pins that.
+
+**Branches are a GitHub-only concept here, deliberately.** `scanGitHubRepository` fetches the
+tarball and the commit history at one ref, so the tree and the history always match. A local scan
+reads whatever is checked out and *reports* it (`RepoInfo.branch`, from `.git/HEAD`) but never
+selects it: `git log` reads `HEAD` while `FileIndex` reads the working tree, so honouring a branch
+flag locally would score one branch's files against another's history, silently, with a `headSha`
+whose tree was never analysed.
 
 ### Engine pipeline
 
@@ -357,11 +411,13 @@ complete `ScanResult`.
 pnpm vitest run                          # all tests
 pnpm typecheck                           # tsc -b
 pnpm sweep                               # false-positive sweep over known hand-written repos
-pnpm audit <path|owner/repo|url>         # the narrated report
-pnpm audit <path> --signals              # raw signal breakdown (the calibration view)
-pnpm audit <path> --structural-only      # ground-truth signals disabled, as calibration runs
-pnpm audit <path> --persona=founder      # a different reader
-pnpm audit --selftest                    # which parsers and grammars actually loaded
+pnpm repo-audit <path|owner/repo|url>    # the narrated report
+pnpm repo-audit <path> --signals         # raw signal breakdown (the calibration view)
+pnpm repo-audit <path> --structural-only # ground-truth signals disabled, as calibration runs
+pnpm repo-audit <path> --persona=founder # a different reader
+pnpm repo-audit                          # no arguments: it asks
+pnpm repo-audit <path> --branch <name>   # a branch, tag or sha (GitHub only)
+pnpm repo-audit --selftest               # which parsers and grammars actually loaded
 pnpm scan / pnpm report                  # aliases, kept so the gate below is unchanged
 pnpm web                                 # Next.js dev server
 ```
@@ -372,13 +428,13 @@ components and the CLI's renderers are source files with no test file of their o
 really did move. No signal changed: the sweep came back byte-identical (median 5, max 24, security
 clean across 20), which is the control for exactly this question.
 
-**`pnpm scan .` on this repo is the fastest sanity check.** Authorship lands around 17, health
-around 2 and security around 29–31 (it drifts with live OSV data — see *The gate*), with exactly
-four structural signals above zero — `agent-tooling`,
-`commit-size`, `unauthenticated-routes` and `missing-license` — and `build-velocity`,
-`license-mismatch` and `refactor-ratio` correctly reporting unavailable. See *The gate* for why each
-is a true measurement. A **fifth** signal firing on our own hand-written code is a false positive to
-investigate, not a result; that check has already caught two real bugs.
+**`pnpm scan .` on this repo is the fastest sanity check.** Authorship lands around 23, health
+around 4 and security around 29–31 (security drifts with live OSV data — see *The gate*), with six
+signals above zero: `agent-tooling`, `build-velocity`, `commit-size`, `unauthenticated-routes`,
+`missing-license` and `vulnerable-dependencies`. `refactor-ratio` and `license-mismatch` correctly
+report unavailable. See *The gate* for why each is a true measurement. A **seventh** signal firing
+on our own hand-written code is a false positive to investigate, not a result; that check has
+already caught two real bugs.
 
 ---
 
@@ -688,6 +744,36 @@ Each was a confidently-wrong result that looked correct until tested against rea
   reproduces it is building the app and scanning a non-JS repository. Third entry in the
   `import.meta`-once-bundled family, and the first where the workaround for one bundler problem
   *created* the next one.
+
+- **`NODE_PATH` made a broken package look perfectly installed.** The clean-room check for the
+  published CLI packs a tarball, installs it into a temp directory outside the repo, and asserts on
+  `duplicate-functions` over a Python/Go/Rust fixture — a number unreachable without a grammar
+  genuinely parsing. It passed. So did the sabotage control, which removes `tree-sitter-wasms`
+  before anything scans and requires the same check to go **red** — it stayed green, in a room whose
+  `node_modules` provably contained no `.wasm` file, while running the identical binary by hand a
+  moment later failed correctly. Four wrong diagnoses came first: a pending-delete race, a
+  memory-mapped file, a stale directory entry, a rename that had not taken. The cause was that
+  **pnpm sets `NODE_PATH` for every script it runs**, pointing at the workspace's virtual store —
+  which contains every package in the monorepo. The child inherited it and resolved *this
+  repository's* grammars. The clean room defended the filesystem and left the environment wide open.
+  `run()` now strips `NODE_PATH` from every child. **Without the sabotage control the whole
+  verification would have been decorative** — it would have reported a healthy package whatever the
+  tarball contained, which is the exact shape of every entry in this list.
+
+- **Bundling CJS into an ESM output produced a package that installed and would not start.**
+  `tar-stream` was excluded from the externals because its `imports` map keys on `"fs"` rather than
+  `"#fs"`, so Node ignores it and `bare-fs` never loads — true, and irrelevant. `tar-stream` and its
+  tree are CommonJS, and esbuild turns each `require()` into a shim that throws on a builtin:
+  `Error: Dynamic require of "events" is not supported`. The build passed every static assertion and
+  died on first run. Only the clean-room install caught it; the fix was to keep it external and
+  accept ten installed-but-never-executed packages.
+
+- **The build emitted two shebangs and the byte check said it was clean.** `packages/cli/src/index.ts`
+  carries `#!/usr/bin/env node` and esbuild preserves it from the entry point, so adding a `banner`
+  produced it twice. `#!` is legal only on line 1, so line 2 was a syntax error and the bundle would
+  not start at all — while the assertion, `startsWith(SHEBANG + "
+")`, was true either way. It now
+  counts them.
 
 The pattern: **a signal that cannot see something reports its absence as a finding.** When adding a
 signal, ask what it looks like on a codebase that legitimately does things differently.

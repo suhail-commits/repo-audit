@@ -158,7 +158,17 @@ describe("run", () => {
   });
 
   it("reports which grammars actually loaded", async () => {
+    /*
+     * The first version of this test asserted the exit code and that "python",
+     * "go" and "rust" appeared in the output — and **it could not fail**, because
+     * those words appear in the `FAILED` lines too. A completely broken install
+     * passed it.
+     *
+     * Asserting the absence of `FAILED` is the whole point: it is the only part
+     * of the output that distinguishes a working install from a dead one.
+     */
     const out = await run(["--selftest"]);
+    expect(out.stdout).not.toContain("FAILED");
     expect(out.exitCode).toBe(0);
     for (const language of ["python", "go", "rust"]) {
       expect(out.stdout).toContain(language);

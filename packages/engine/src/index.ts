@@ -31,11 +31,13 @@ export { scoreDimension, authorshipBand } from "./score/index";
 export {
   fetchRepoMeta,
   fetchTarball,
+  fetchBranches,
   fetchCommits,
   isValidSlug,
   GitHubError,
   type RepoMeta,
   type TarballResult,
+  type BranchList,
   type CommitHistory,
   type GitHubOptions,
 } from "./ingest/github";
@@ -43,7 +45,7 @@ export { LIMITS } from "./ingest/guards";
 
 export { FileIndex, type IndexedFile } from "./index/files";
 export { AstIndex, walk, collect, memberPath, type AstNode } from "./index/ast";
-export { GitIndex, type Commit } from "./index/git";
+export { GitIndex, checkedOutBranch, type Commit } from "./index/git";
 export { ImportGraph } from "./index/imports";
 export { RouteTable, type Route, type HttpMethod } from "./index/routes";
 export { detectFrameworks, type FrameworkInfo } from "./index/frameworks";

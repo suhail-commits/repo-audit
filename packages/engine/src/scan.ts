@@ -22,7 +22,7 @@ import {
 import { AstIndex } from "./index/ast";
 import { FileIndex } from "./index/files";
 import { detectFrameworks } from "./index/frameworks";
-import { GitIndex } from "./index/git";
+import { GitIndex, checkedOutBranch } from "./index/git";
 import { ImportGraph } from "./index/imports";
 import { profileLanguages } from "./index/language";
 import { StructuralIndex } from "./index/structural";
@@ -149,6 +149,8 @@ export async function scanRepository(
     ...(onProgress ? { onProgress } : {}),
   });
 
+  const branch = checkedOutBranch(rootPath);
+
   stage(onProgress, "authorship");
   const authorship = analyzeAuthorship(ctx, options);
   // Health re-weights the structural signals authorship already computed rather
@@ -181,6 +183,14 @@ export async function scanRepository(
       frameworks: ctx.frameworks.names,
       languages: ctx.languages.shares,
       analysisTier: ctx.languages.dominantTier,
+      /*
+       * Whatever is checked out — never a branch the caller asked for. The
+       * files indexed above are the ones on disk, so naming any other branch
+       * would describe a tree that was never analysed. Overwritten by
+       * `scanGitHubRepository`, where source and history are fetched together
+       * at one ref and the branch is therefore known to match.
+       */
+      ...(branch ? { branch } : {}),
       // Newest commit first, so the head of the history is the revision the
       // files on disk correspond to. Absent for a source with no history.
       ...(ctx.git.commits[0]?.sha
@@ -301,13 +311,23 @@ export async function scanGitHubRepository(
   const meta = options.meta ?? (await fetchRepoMeta(slug, options));
   assertScannable(meta, maxSizeKb);
 
+  /*
+   * `fetchRepoMeta` already ran for the privacy and size gates, so the default
+   * branch is in hand at no request cost — which is why the report can always
+   * name the branch it read, not only when one was asked for.
+   */
+  const ref = options.ref ?? meta.defaultBranch;
+  const fetchOptions = { ...options, ref };
+
   const workdir = await mkdtemp(path.join(tmpdir(), "repo-audit-"));
 
   try {
     stage(options.onProgress, "fetching");
+    // Both at the same ref, always. Fetching the tree at one and the history at
+    // another would score one branch's files against another's commits.
     const [, history] = await Promise.all([
-      fetchTarball(slug, workdir, options),
-      fetchCommits(slug, options),
+      fetchTarball(slug, workdir, fetchOptions),
+      fetchCommits(slug, fetchOptions),
     ]);
 
     const result = await scanRepository(workdir, {
@@ -327,6 +347,7 @@ export async function scanGitHubRepository(
       ...result,
       repo: {
         ...result.repo,
+        branch: ref,
         // Recorded so a later scan of the same repository can tell whether
         // anything has moved without analysing it again.
         ...(meta.pushedAt ? { pushedAt: meta.pushedAt } : {}),

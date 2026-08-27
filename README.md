@@ -27,7 +27,7 @@ PROVENANCE — 64/100
 
 ## How it decides
 
-Thirteen signals, weighted and combined. They fall into three groups.
+Sixteen signals, weighted and combined. They fall into three groups.
 
 **Direct evidence.** Commit trailers (`Co-Authored-By: Claude`, Cursor, Copilot, Devin) and AI
 builder fingerprints (Lovable's `lovable-tagger`, Bolt's `.bolt/`, Replit, v0). When these fire the
@@ -73,8 +73,8 @@ deep it could go.
 
 | Tier | Languages | What runs |
 |---|---|---|
-| Full | JavaScript, TypeScript | all thirteen signals |
-| Structural | Python | duplication, comment narration, test assertions, plus history |
+| Full | JavaScript, TypeScript | all sixteen signals |
+| Structural | Python, Go, Rust | duplication and comment narration, plus history; Python also gets test assertions and swallowed errors |
 | History | everything else | commit trailers, commit shape, velocity, platform markers |
 
 A language we cannot parse is a gap in the evidence, not a clean bill of health, and the report
@@ -97,8 +97,12 @@ pattern connecting them is the main thing to understand about building this kind
 **The pattern: a signal that cannot see something reports its absence as a finding.** Each of these
 was a confidently wrong answer that looked entirely plausible until it met real code.
 
-The engine is also pointed at itself — `pnpm scan .` should score near zero, and any signal that
-starts firing on hand-written code is treated as a bug rather than a result.
+The engine is also pointed at itself. It does **not** score near zero, and the reason is the point:
+`CLAUDE.md` sits in the repository, the median commit really is around 465 lines, and the one
+state-changing route really is public by design. Each of those is a true measurement of a
+deliberate choice. What matters is that the list of signals firing is known and short — a signal
+that starts firing outside it is treated as a bug rather than a result, and that check has already
+caught two real false positives.
 
 ## Architecture
 
@@ -106,6 +110,7 @@ starts firing on hand-written code is treated as a bug rather than a result.
 packages/shared   types and score bands       (no dependencies)
 packages/engine   all analysis                (shared)
 packages/rules    report prose, personas      (shared)
+packages/cli      the terminal product        (all three)
 apps/web          Next.js UI                  (all three)
 ```
 
@@ -130,20 +135,38 @@ scale neither is the bottleneck.
 **Reports have three registers** — owner, engineer, and buyer — rendered from the same `ScanResult`,
 so switching between them costs nothing.
 
-## Running it
+## Install it
+
+```bash
+npx how-much-ai .                        # scan a checkout, no clone needed
+npx how-much-ai                          # or let it ask
+```
+
+Node >= 22.12. The command installs as `repo-audit`.
+
+**Only Windows is verified.** The parser ships a different native binary per
+platform and this package has no CI yet, so macOS and Linux are untested rather
+than known-good. `repo-audit --selftest` reports which parsers and grammars
+actually loaded on your machine, and exits non-zero if any did not — that output
+is the useful thing to include in a bug report.
+
+## Running it from source
 
 ```bash
 pnpm install
-pnpm audit .                             # the narrated report for a local checkout
-pnpm audit owner/repo                    # …or a public GitHub repository
-pnpm audit . --signals                   # every signal, its weight and its evidence
-pnpm audit --help                        # everything else
+pnpm repo-audit .                        # the narrated report for a local checkout
+pnpm repo-audit owner/repo               # …or a public GitHub repository
+pnpm repo-audit . --signals              # every signal, its weight and its evidence
+pnpm repo-audit                          # no arguments: it asks which repo and branch
+pnpm repo-audit a/b --branch develop     # a specific branch (GitHub repositories only)
+pnpm repo-audit --help                   # everything else
 pnpm vitest run                          # the test suite
 pnpm web                                 # the app, on :3000
 ```
 
-`pnpm scan` and `pnpm report` still work; they are aliases for `pnpm audit --signals` and
-`pnpm audit`.
+`pnpm scan` and `pnpm report` still work; they are aliases for `pnpm repo-audit --signals` and
+`pnpm repo-audit`. The script is **not** called `audit`: `pnpm audit` is a built-in pnpm command
+and silently shadows any script of that name, so it would never have run this one.
 
 **A local checkout is read at full strength, and the hosted app cannot be.** GitHub's API returns
 per-*commit* totals but no per-*file* changes, and fetching those costs one request per commit —
