@@ -263,6 +263,32 @@ the distribution the report compares against goes stale even though nothing abou
 4. Confirm it survives the deploy target: no `git` binary, no writable filesystem outside `/tmp`,
    a hard function duration cap.
 
+### Playbook — publishing the CLI
+
+The package is **`how-much-ai`** on npm; the binary it installs is `repo-audit`. `repo-audit` was
+already taken by a codebase-health tool, which is the worst kind of collision.
+
+1. `pnpm build` — one esbuild call into `packages/cli/dist`, a generated staging directory, so every
+   `packages/*` stays `private: true` and what ships is exactly what the build wrote.
+2. **The output must be ESM.** CJS rewrites `import.meta.url`, and `structural.ts` builds its
+   grammar resolver from `createRequire(import.meta.url)` — a CJS bundle kills every structural
+   language at load, silently.
+3. **Five dependencies stay external**: `oxc-parser`, `oxc-resolver`, `web-tree-sitter`,
+   `tree-sitter-wasms`, `tar-stream`. The list is *derived* from `packages/engine/package.json` and
+   becomes both esbuild's `external` and the published `dependencies`, so they cannot drift.
+4. `pnpm verify:package` — packs, installs into a temp directory **outside the repo**, scans a
+   Python/Go/Rust fixture, then **breaks the install and requires the same checks to fail**. Both
+   halves are mandatory. Read the entries in *Bugs worth remembering*: the verification passed
+   against a package with no grammars in it at all until `NODE_PATH` was stripped from the child
+   environment.
+5. Assert only on things a broken package cannot fake — `duplicate-functions` over non-JS/TS files,
+   `routes`, a `moduleGraph` with edges. **Never `analysisTier`**, which is computed from file
+   extensions and reads "structural" on a completely dead engine.
+6. `npm publish` from `packages/cli/dist` stays a human action. It is irreversible after 72 hours.
+
+**Only Windows is verified.** oxc ships a different native binary per platform and there is no CI;
+the README says so rather than implying coverage that does not exist.
+
 ### Playbook — upgrading `oxc-parser`
 
 Pre-1.0, ships a minor roughly weekly, and has already renamed AST nodes once — silently returning
@@ -718,6 +744,36 @@ Each was a confidently-wrong result that looked correct until tested against rea
   reproduces it is building the app and scanning a non-JS repository. Third entry in the
   `import.meta`-once-bundled family, and the first where the workaround for one bundler problem
   *created* the next one.
+
+- **`NODE_PATH` made a broken package look perfectly installed.** The clean-room check for the
+  published CLI packs a tarball, installs it into a temp directory outside the repo, and asserts on
+  `duplicate-functions` over a Python/Go/Rust fixture — a number unreachable without a grammar
+  genuinely parsing. It passed. So did the sabotage control, which removes `tree-sitter-wasms`
+  before anything scans and requires the same check to go **red** — it stayed green, in a room whose
+  `node_modules` provably contained no `.wasm` file, while running the identical binary by hand a
+  moment later failed correctly. Four wrong diagnoses came first: a pending-delete race, a
+  memory-mapped file, a stale directory entry, a rename that had not taken. The cause was that
+  **pnpm sets `NODE_PATH` for every script it runs**, pointing at the workspace's virtual store —
+  which contains every package in the monorepo. The child inherited it and resolved *this
+  repository's* grammars. The clean room defended the filesystem and left the environment wide open.
+  `run()` now strips `NODE_PATH` from every child. **Without the sabotage control the whole
+  verification would have been decorative** — it would have reported a healthy package whatever the
+  tarball contained, which is the exact shape of every entry in this list.
+
+- **Bundling CJS into an ESM output produced a package that installed and would not start.**
+  `tar-stream` was excluded from the externals because its `imports` map keys on `"fs"` rather than
+  `"#fs"`, so Node ignores it and `bare-fs` never loads — true, and irrelevant. `tar-stream` and its
+  tree are CommonJS, and esbuild turns each `require()` into a shim that throws on a builtin:
+  `Error: Dynamic require of "events" is not supported`. The build passed every static assertion and
+  died on first run. Only the clean-room install caught it; the fix was to keep it external and
+  accept ten installed-but-never-executed packages.
+
+- **The build emitted two shebangs and the byte check said it was clean.** `packages/cli/src/index.ts`
+  carries `#!/usr/bin/env node` and esbuild preserves it from the entry point, so adding a `banner`
+  produced it twice. `#!` is legal only on line 1, so line 2 was a syntax error and the bundle would
+  not start at all — while the assertion, `startsWith(SHEBANG + "
+")`, was true either way. It now
+  counts them.
 
 The pattern: **a signal that cannot see something reports its absence as a finding.** When adding a
 signal, ask what it looks like on a codebase that legitimately does things differently.

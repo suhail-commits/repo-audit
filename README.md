@@ -135,7 +135,22 @@ scale neither is the bottleneck.
 **Reports have three registers** — owner, engineer, and buyer — rendered from the same `ScanResult`,
 so switching between them costs nothing.
 
-## Running it
+## Install it
+
+```bash
+npx how-much-ai .                        # scan a checkout, no clone needed
+npx how-much-ai                          # or let it ask
+```
+
+Node >= 22.12. The command installs as `repo-audit`.
+
+**Only Windows is verified.** The parser ships a different native binary per
+platform and this package has no CI yet, so macOS and Linux are untested rather
+than known-good. `repo-audit --selftest` reports which parsers and grammars
+actually loaded on your machine, and exits non-zero if any did not — that output
+is the useful thing to include in a bug report.
+
+## Running it from source
 
 ```bash
 pnpm install
