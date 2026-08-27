@@ -12,10 +12,13 @@
     "web": "pnpm --filter @vibe/web dev",
     "seed": "pnpm --filter @vibe/web seed",
     "sweep": "tsx scripts/false-positive-sweep.ts",
-    "repo-audit": "tsx packages/cli/src/index.ts"
+    "repo-audit": "tsx packages/cli/src/index.ts",
+    "build": "tsx scripts/build-cli.ts",
+    "verify:package": "tsx scripts/verify-package.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "esbuild": "^0.28.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
